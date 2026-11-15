@@ -1,0 +1,8 @@
+{
+  "name": "Remix Yazır Optik - Müşteri, Reçete ve Stok Takip Sistemi",
+  "description": "Yazır Optik için özel gözlükçü otomasyonu: Müşteri bilgileri, TC kimlik, gözlük numaraları (SPH/CYL/AXIS/PD), çerçeve ve cam stoğu, maliyet ve satış fiyatı takibi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
