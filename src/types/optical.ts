@@ -58,6 +58,25 @@ export interface FrameItem {
 export type OrderStatus = 'hazirlaniyor' | 'teslim_edildi';
 export type PaymentMethod = 'nakit' | 'kredi_karti' | 'havale' | 'parcali';
 
+export interface CashAccount {
+  id: string;
+  name: string;
+  color: 'cyan' | 'indigo' | 'amber' | 'emerald';
+}
+
+export type CashTransactionType = 'in' | 'out';
+
+export interface CashTransaction {
+  id: string;
+  type: CashTransactionType;
+  accountId: string;
+  amount: number;
+  category: string;
+  description: string;
+  date: string; // YYYY-MM-DD
+  createdAt: string;
+}
+
 export interface SaleOrder {
   id: string;
   orderNo: string; // örn: YO-2026-104
@@ -72,6 +91,7 @@ export interface SaleOrder {
   paidAmount: number;   // Tahsil Edilen
   remainingAmount: number;
   paymentMethod?: PaymentMethod;
+  accountId?: string;   // Tahsilatın işlendiği kişi hesabı
   status: OrderStatus;
   orderDate: string;
   deliveryDate?: string;

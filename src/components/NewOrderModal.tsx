@@ -3,8 +3,9 @@ import {
   X, Glasses, User, Eye, Tag, DollarSign, Check, History, Copy, AlertCircle
 } from 'lucide-react';
 import {
-  SaleOrder, Customer, GlassesUsageType, UsageOption, EyeValues
+  SaleOrder, Customer, GlassesUsageType, UsageOption, EyeValues, CashAccount
 } from '../types/optical';
+import { storage } from '../services/storage';
 import {
   formatDate, formatCurrency, formatPhoneInput,
   getCustomerOrderList, getOrderIndexForCustomer
@@ -14,6 +15,7 @@ interface NewOrderModalProps {
   initialOrder?: SaleOrder | null;
   customers: Customer[];
   orders: SaleOrder[];
+  accounts?: CashAccount[];
   onSave: (order: SaleOrder) => void;
   onClose: () => void;
 }
@@ -34,9 +36,14 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   initialOrder,
   customers,
   orders,
+  accounts: propAccounts,
   onSave,
   onClose,
 }) => {
+  const accounts = useMemo(
+    () => (propAccounts && propAccounts.length > 0 ? propAccounts : storage.getAccounts()),
+    [propAccounts]
+  );
   const isEditingExisting = Boolean(initialOrder?.id);
 
   // 1. Customer State
@@ -126,6 +133,9 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   );
   const [orderDate, setOrderDate] = useState(
     initialOrder?.orderDate || new Date().toISOString().split('T')[0]
+  );
+  const [accountId, setAccountId] = useState<string>(
+    initialOrder?.accountId || accounts[0]?.id || 'acc-1'
   );
   const [notes, setNotes] = useState(initialOrder?.notes || '');
 
@@ -271,31 +281,31 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
     const distPair = {
       rightEye: {
-        sph: distRSph.trim(),
-        cyl: distRCyl.trim(),
-        axis: distRAxis.trim(),
-        pd: distRPd.trim(),
+        sph: distRSph.trim().slice(0, 8),
+        cyl: distRCyl.trim().slice(0, 8),
+        axis: distRAxis.trim().slice(0, 8),
+        pd: distRPd.trim().slice(0, 8),
       },
       leftEye: {
-        sph: distLSph.trim(),
-        cyl: distLCyl.trim(),
-        axis: distLAxis.trim(),
-        pd: distLPd.trim(),
+        sph: distLSph.trim().slice(0, 8),
+        cyl: distLCyl.trim().slice(0, 8),
+        axis: distLAxis.trim().slice(0, 8),
+        pd: distLPd.trim().slice(0, 8),
       },
     };
 
     const nearPair = {
       rightEye: {
-        sph: nearRSph.trim(),
-        cyl: nearRCyl.trim(),
-        axis: nearRAxis.trim(),
-        pd: nearRPd.trim(),
+        sph: nearRSph.trim().slice(0, 8),
+        cyl: nearRCyl.trim().slice(0, 8),
+        axis: nearRAxis.trim().slice(0, 8),
+        pd: nearRPd.trim().slice(0, 8),
       },
       leftEye: {
-        sph: nearLSph.trim(),
-        cyl: nearLCyl.trim(),
-        axis: nearLAxis.trim(),
-        pd: nearLPd.trim(),
+        sph: nearLSph.trim().slice(0, 8),
+        cyl: nearLCyl.trim().slice(0, 8),
+        axis: nearLAxis.trim().slice(0, 8),
+        pd: nearLPd.trim().slice(0, 8),
       },
     };
 
@@ -357,6 +367,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       salePrice: finalSalePrice,
       paidAmount: finalSalePrice,
       remainingAmount: 0,
+      accountId,
       status: initialOrder?.status || 'hazirlaniyor',
       orderDate,
       warrantyMonths: 24,
@@ -443,12 +454,12 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   <span>Önceki: {latestPreviousOrder.frame.brand} {latestPreviousOrder.frame.model}</span>
                   <span>{formatDate(latestPreviousOrder.orderDate)} • {formatCurrency(latestPreviousOrder.salePrice)}</span>
                 </div>
-                <div className="font-mono text-[11px] flex justify-between bg-slate-50 p-1.5 rounded">
+                <div className="font-mono text-[11px] flex flex-col mid:flex-row mid:justify-between gap-1 bg-slate-50 p-1.5 rounded">
                   <span className="text-blue-700 font-bold">
-                    Sağ: {latestPreviousOrder.prescription.rightEye?.sph || '0'} (Cyl: {latestPreviousOrder.prescription.rightEye?.cyl || '0'} Aks: {latestPreviousOrder.prescription.rightEye?.axis || '0'}°)
+                    Sağ: {latestPreviousOrder.prescription.rightEye?.sph || '0'} (Cyl: {latestPreviousOrder.prescription.rightEye?.cyl || '0'} Aks: {latestPreviousOrder.prescription.rightEye?.axis || '0'}° PD: {latestPreviousOrder.prescription.rightEye?.pd || '-'})
                   </span>
                   <span className="text-indigo-700 font-bold">
-                    Sol: {latestPreviousOrder.prescription.leftEye?.sph || '0'} (Cyl: {latestPreviousOrder.prescription.leftEye?.cyl || '0'} Aks: {latestPreviousOrder.prescription.leftEye?.axis || '0'}°)
+                    Sol: {latestPreviousOrder.prescription.leftEye?.sph || '0'} (Cyl: {latestPreviousOrder.prescription.leftEye?.cyl || '0'} Aks: {latestPreviousOrder.prescription.leftEye?.axis || '0'}° PD: {latestPreviousOrder.prescription.leftEye?.pd || '-'})
                   </span>
                 </div>
               </div>
@@ -872,6 +883,41 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
               </div>
             </div>
 
+            {/* Ödeme Alınan Hesap (3 Kişi + Ortak) */}
+            <div className="pt-2 border-t border-cyan-100">
+              <label className="text-xs font-bold text-slate-800 block mb-1.5">
+                Tahsilat Hesabı (Para Hangi Hesaba Girdi?)
+              </label>
+              <div className="grid grid-cols-2 mid:grid-cols-4 gap-2">
+                {accounts.map((acc) => {
+                  const selected = accountId === acc.id;
+                  const activeClasses =
+                    acc.color === 'cyan'
+                      ? 'bg-cyan-600 text-white border-cyan-700 shadow-xs'
+                      : acc.color === 'indigo'
+                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                        : acc.color === 'emerald'
+                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                          : 'bg-amber-600 text-white border-amber-700 shadow-xs';
+                  return (
+                    <button
+                      key={acc.id}
+                      type="button"
+                      onClick={() => setAccountId(acc.id)}
+                      className={`px-3 py-2 rounded-lg border text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        selected
+                          ? activeClasses
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      {selected && <Check className="w-3.5 h-3.5 stroke-[3] shrink-0" />}
+                      <span className="truncate">{acc.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Tarih ve Not */}
             <div className="grid grid-cols-1 mid:grid-cols-3 gap-3 pt-2 border-t border-cyan-100">
               <div>
@@ -977,7 +1023,7 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
           {title}
         </span>
         <span className={`text-[11px] ${isAmber ? 'text-amber-800/80' : 'text-slate-500'}`}>
-          SPH (Küre) • CYL (Silindir) • AKS (Açı 0°-180°)
+          SPH (Küre) • CYL (Silindir) • AKS (Açı 0°-180°) • PD (mm)
         </span>
       </div>
 
@@ -1000,8 +1046,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={rSph}
-                  onChange={(e) => setRSph(e.target.value)}
+                  onChange={(e) => setRSph(e.target.value.slice(0, 8))}
                   placeholder="+1.50 / -2.00"
                   className={sphInputClass}
                 />
@@ -1009,8 +1056,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={rCyl}
-                  onChange={(e) => setRCyl(e.target.value)}
+                  onChange={(e) => setRCyl(e.target.value.slice(0, 8))}
                   placeholder="-0.75"
                   className={inputBaseClass}
                 />
@@ -1018,8 +1066,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={rAxis}
-                  onChange={(e) => setRAxis(e.target.value)}
+                  onChange={(e) => setRAxis(e.target.value.slice(0, 8))}
                   placeholder="90"
                   className={inputBaseClass}
                 />
@@ -1027,8 +1076,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={rPd}
-                  onChange={(e) => setRPd(e.target.value)}
+                  onChange={(e) => setRPd(e.target.value.slice(0, 8))}
                   placeholder="31.5"
                   className={inputBaseClass}
                 />
@@ -1042,8 +1092,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={lSph}
-                  onChange={(e) => setLSph(e.target.value)}
+                  onChange={(e) => setLSph(e.target.value.slice(0, 8))}
                   placeholder="+1.25 / -2.50"
                   className={sphInputClass}
                 />
@@ -1051,8 +1102,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={lCyl}
-                  onChange={(e) => setLCyl(e.target.value)}
+                  onChange={(e) => setLCyl(e.target.value.slice(0, 8))}
                   placeholder="-0.50"
                   className={inputBaseClass}
                 />
@@ -1060,8 +1112,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={lAxis}
-                  onChange={(e) => setLAxis(e.target.value)}
+                  onChange={(e) => setLAxis(e.target.value.slice(0, 8))}
                   placeholder="85"
                   className={inputBaseClass}
                 />
@@ -1069,8 +1122,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={lPd}
-                  onChange={(e) => setLPd(e.target.value)}
+                  onChange={(e) => setLPd(e.target.value.slice(0, 8))}
                   placeholder="31.0"
                   className={inputBaseClass}
                 />

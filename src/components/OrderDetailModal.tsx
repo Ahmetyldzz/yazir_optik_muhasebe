@@ -124,6 +124,13 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 }`}>
                   {index}. Gözlük (Toplam {total})
                 </span>
+                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full ${
+                  order.status === 'teslim_edildi'
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'bg-slate-700 text-amber-300 border border-slate-600'
+                }`}>
+                  {order.status === 'teslim_edildi' ? 'Teslim Edildi' : 'Hazırlanıyor'}
+                </span>
               </div>
               <p className="text-xs text-slate-400">
                 Kayıt Tarihi: {formatDateTime(order.createdAt)}

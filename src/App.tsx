@@ -14,13 +14,19 @@ import { ReceiptPrintModal } from './components/ReceiptPrintModal';
 import { BackupModal } from './components/BackupModal';
 import { SettingsModal } from './components/SettingsModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
+import { FinanceAuthModal } from './components/FinanceAuthModal';
 import { storage } from './services/storage';
-import { SaleOrder, StoreSettings, Customer, OrderStatus } from './types/optical';
+import { getCustomerOrderList } from './utils/formatters';
+import {
+  SaleOrder, StoreSettings, Customer, OrderStatus, CashAccount, CashTransaction
+} from './types/optical';
 
 export default function App() {
   const [orders, setOrders] = useState<SaleOrder[]>(() => storage.getOrders());
   const [customers, setCustomers] = useState<Customer[]>(() => storage.getCustomers());
   const [settings, setSettings] = useState<StoreSettings>(() => storage.getSettings());
+  const [accounts, setAccounts] = useState<CashAccount[]>(() => storage.getAccounts());
+  const [transactions, setTransactions] = useState<CashTransaction[]>(() => storage.getTransactions());
 
   const [activeTab, setActiveTab] = useState<ActiveTabType>('orders');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -33,6 +39,8 @@ export default function App() {
   const [printingOrder, setPrintingOrder] = useState<SaleOrder | null>(null);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isFinanceUnlocked, setIsFinanceUnlocked] = useState<boolean>(() => storage.isFinanceSessionValid());
+  const [isFinanceAuthOpen, setIsFinanceAuthOpen] = useState(false);
 
   // Sync state to localStorage whenever it changes
   useEffect(() => {
@@ -46,6 +54,44 @@ export default function App() {
   useEffect(() => {
     storage.saveSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    storage.saveAccounts(accounts);
+  }, [accounts]);
+
+  useEffect(() => {
+    storage.saveTransactions(transactions);
+  }, [transactions]);
+
+  // Automatically re-lock Ciro & Kasa Özeti after 1 hour expires
+  useEffect(() => {
+    if (!isFinanceUnlocked) return;
+
+    const remainingMs = storage.getFinanceUnlockUntil() - Date.now();
+    if (remainingMs <= 0) {
+      storage.lockFinanceSession();
+      setIsFinanceUnlocked(false);
+      if (activeTab === 'finance') {
+        setActiveTab('orders');
+        setIsFinanceAuthOpen(true);
+      }
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      storage.lockFinanceSession();
+      setIsFinanceUnlocked(false);
+      setActiveTab((curr) => {
+        if (curr === 'finance') {
+          setIsFinanceAuthOpen(true);
+          return 'orders';
+        }
+        return curr;
+      });
+    }, remainingMs);
+
+    return () => window.clearTimeout(timer);
+  }, [isFinanceUnlocked, activeTab]);
 
   // Order Handlers
   const handleSaveOrder = (savedOrder: SaleOrder) => {
@@ -193,13 +239,55 @@ export default function App() {
     setIsNewOrderModalOpen(true);
   };
 
+  const handleAddTransaction = (tx: CashTransaction) => {
+    setTransactions((prev) => [tx, ...prev]);
+  };
+
+  const handleUpdateTransaction = (updatedTx: CashTransaction) => {
+    setTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
+  };
+
+  const handleDeleteTransaction = (txId: string) => {
+    setTransactions((prev) => prev.filter((t) => t.id !== txId));
+  };
+
+  const handleAssignOrderAccount = (orderId: string, accountId: string) => {
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, accountId } : o)));
+    if (selectedOrder && selectedOrder.id === orderId) {
+      setSelectedOrder((prev) => (prev ? { ...prev, accountId } : null));
+    }
+  };
+
   const handleDataRestored = () => {
     setOrders(storage.getOrders());
     setCustomers(storage.getCustomers());
     setSettings(storage.getSettings());
+    setAccounts(storage.getAccounts());
+    setTransactions(storage.getTransactions());
   };
 
-  const pendingDeliveries = orders.length;
+  const pendingDeliveries = orders.filter((o) => o.status !== 'teslim_edildi').length;
+
+  const directoryCustomersCount = customers.filter((cust) => {
+    const allCustOrders = getCustomerOrderList(orders, cust);
+    const deliveredOrders = allCustOrders.filter((o) => o.status === 'teslim_edildi');
+    return deliveredOrders.length > 0 || allCustOrders.length === 0;
+  }).length;
+
+  const handleTabChange = (tab: ActiveTabType) => {
+    if (tab === 'finance') {
+      if (!storage.isFinanceSessionValid()) {
+        storage.lockFinanceSession();
+        setIsFinanceUnlocked(false);
+        setIsFinanceAuthOpen(true);
+        return;
+      }
+      setIsFinanceUnlocked(true);
+      setActiveTab('finance');
+      return;
+    }
+    setActiveTab(tab);
+  };
 
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans selection:bg-cyan-200">
@@ -207,7 +295,8 @@ export default function App() {
       <Header
         settings={settings}
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleTabChange}
+        isFinanceUnlocked={isFinanceUnlocked}
         onOpenNewOrder={() => {
           setEditingOrder(null);
           setIsNewOrderModalOpen(true);
@@ -215,8 +304,8 @@ export default function App() {
         onOpenAdminPanel={() => setIsAdminPanelOpen(true)}
         onOpenBackup={() => setIsBackupModalOpen(true)}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
-        ordersCount={orders.length}
-        customersCount={customers.length}
+        ordersCount={pendingDeliveries}
+        customersCount={directoryCustomersCount}
         pendingDeliveriesCount={pendingDeliveries}
       />
 
@@ -252,10 +341,22 @@ export default function App() {
         )}
 
         {/* TAB 3: CİRO & KASA ÖZETİ */}
-        {activeTab === 'finance' && (
+        {activeTab === 'finance' && isFinanceUnlocked && (
           <FinanceSummary
             orders={orders}
+            accounts={accounts}
+            transactions={transactions}
             onSelectOrder={(ord) => setSelectedOrder(ord)}
+            onSaveAccounts={(updatedAccounts) => setAccounts(updatedAccounts)}
+            onAddTransaction={handleAddTransaction}
+            onUpdateTransaction={handleUpdateTransaction}
+            onDeleteTransaction={handleDeleteTransaction}
+            onAssignOrderAccount={handleAssignOrderAccount}
+            onLockFinance={() => {
+              storage.lockFinanceSession();
+              setIsFinanceUnlocked(false);
+              setActiveTab('orders');
+            }}
           />
         )}
       </main>
@@ -287,6 +388,7 @@ export default function App() {
           initialOrder={editingOrder}
           customers={customers}
           orders={orders}
+          accounts={accounts}
           onSave={handleSaveOrder}
           onClose={() => {
             setIsNewOrderModalOpen(false);
@@ -344,6 +446,18 @@ export default function App() {
           onClose={() => setIsSettingsModalOpen(false)}
         />
       )}
+
+      {/* Finance Auth Modal */}
+      <FinanceAuthModal
+        isOpen={isFinanceAuthOpen}
+        onSuccess={() => {
+          storage.unlockFinanceSession();
+          setIsFinanceUnlocked(true);
+          setIsFinanceAuthOpen(false);
+          setActiveTab('finance');
+        }}
+        onCancel={() => setIsFinanceAuthOpen(false)}
+      />
     </div>
   );
 }

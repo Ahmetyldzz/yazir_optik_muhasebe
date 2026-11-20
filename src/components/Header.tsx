@@ -1,5 +1,5 @@
 import React from 'react';
-import { Glasses, Plus, Users, LayoutDashboard, BarChart3, Settings, Database, ShieldCheck } from 'lucide-react';
+import { Glasses, Plus, Users, LayoutDashboard, BarChart3, Settings, Database, ShieldCheck, Lock } from 'lucide-react';
 import { StoreSettings } from '../types/optical';
 
 export type ActiveTabType = 'orders' | 'customers' | 'finance';
@@ -8,6 +8,7 @@ interface HeaderProps {
   settings: StoreSettings;
   activeTab: ActiveTabType;
   setActiveTab: (tab: ActiveTabType) => void;
+  isFinanceUnlocked?: boolean;
   onOpenNewOrder: () => void;
   onOpenAdminPanel: () => void;
   onOpenBackup: () => void;
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   settings,
   activeTab,
   setActiveTab,
+  isFinanceUnlocked = false,
   onOpenNewOrder,
   onOpenAdminPanel,
   onOpenBackup,
@@ -155,6 +157,9 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <BarChart3 className="w-4 h-4 text-cyan-400 shrink-0" />
             <span>Ciro & Kasa Özeti</span>
+            {!isFinanceUnlocked && (
+              <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            )}
           </button>
         </div>
       </div>

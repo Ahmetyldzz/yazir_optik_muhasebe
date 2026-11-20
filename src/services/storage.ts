@@ -1,5 +1,5 @@
-import { SaleOrder, InventoryItem, StoreSettings, Customer } from '../types/optical';
-import { initialOrders, initialInventory, defaultSettings } from '../data/initialData';
+import { SaleOrder, InventoryItem, StoreSettings, Customer, CashAccount, CashTransaction } from '../types/optical';
+import { initialOrders, initialInventory, defaultSettings, defaultAccounts, initialTransactions } from '../data/initialData';
 
 const ORDERS_KEY = 'yazir_optik_orders_v1';
 const INVENTORY_KEY = 'yazir_optik_inventory_v1';
@@ -8,6 +8,10 @@ const SETTINGS_KEY = 'yazir_optik_settings_v1';
 const LENS_BRANDS_KEY = 'yazir_optik_lens_brands_v1';
 const LENS_MODELS_KEY = 'yazir_optik_lens_models_v1';
 const FRAME_MODELS_KEY = 'yazir_optik_frame_models_v1';
+const ACCOUNTS_KEY = 'yazir_optik_accounts_v1';
+const TRANSACTIONS_KEY = 'yazir_optik_transactions_v1';
+const FINANCE_UNLOCK_KEY = 'yazir_optik_finance_unlock_until_v1';
+const FINANCE_UNLOCK_DURATION_MS = 60 * 60 * 1000; // 1 saat
 
 export const DEFAULT_LENS_BRANDS = [
   'Zeiss',
@@ -72,6 +76,27 @@ export const storage = {
       let list: SaleOrder[] = initialOrders;
       if (data) {
         list = JSON.parse(data);
+        let upgraded = false;
+        list = list.map((o) => {
+          const isUntouchedLegacyDefault =
+            o.framePrice === undefined &&
+            o.lensPrice === undefined &&
+            !o.prescription?.usageTypes &&
+            !o.prescription?.distanceRx;
+          const freshDefault = initialOrders.find((init) => init.id === o.id);
+          if (isUntouchedLegacyDefault && freshDefault) {
+            upgraded = true;
+            return freshDefault;
+          }
+          if (!o.accountId && freshDefault?.accountId) {
+            upgraded = true;
+            return { ...o, accountId: freshDefault.accountId };
+          }
+          return o;
+        });
+        if (upgraded) {
+          localStorage.setItem(ORDERS_KEY, JSON.stringify(list));
+        }
       } else {
         localStorage.setItem(ORDERS_KEY, JSON.stringify(initialOrders));
       }
@@ -265,9 +290,98 @@ export const storage = {
     return current;
   },
 
+  getAccounts(): CashAccount[] {
+    try {
+      const data = localStorage.getItem(ACCOUNTS_KEY);
+      if (!data) {
+        localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(defaultAccounts));
+        return defaultAccounts;
+      }
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length >= 3) {
+        const hasCommon = parsed.some((a: CashAccount) => a.id === 'acc-common');
+        if (!hasCommon) {
+          const updated: CashAccount[] = [
+            ...parsed,
+            { id: 'acc-common', name: 'Ortak Hesap', color: 'emerald' },
+          ];
+          localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(updated));
+          return updated;
+        }
+        return parsed;
+      }
+      return defaultAccounts;
+    } catch {
+      return defaultAccounts;
+    }
+  },
+
+  saveAccounts(accounts: CashAccount[]): void {
+    try {
+      localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+    } catch (e) {
+      console.error('Error saving accounts', e);
+    }
+  },
+
+  getTransactions(): CashTransaction[] {
+    try {
+      const data = localStorage.getItem(TRANSACTIONS_KEY);
+      if (!data) {
+        localStorage.setItem(TRANSACTIONS_KEY, JSON.stringify(initialTransactions));
+        return initialTransactions;
+      }
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : initialTransactions;
+    } catch {
+      return initialTransactions;
+    }
+  },
+
+  saveTransactions(transactions: CashTransaction[]): void {
+    try {
+      localStorage.setItem(TRANSACTIONS_KEY, JSON.stringify(transactions));
+    } catch (e) {
+      console.error('Error saving transactions', e);
+    }
+  },
+
+  getFinanceUnlockUntil(): number {
+    try {
+      const raw = localStorage.getItem(FINANCE_UNLOCK_KEY);
+      if (!raw) return 0;
+      const ts = Number(raw);
+      return Number.isFinite(ts) ? ts : 0;
+    } catch {
+      return 0;
+    }
+  },
+
+  isFinanceSessionValid(): boolean {
+    return Date.now() < this.getFinanceUnlockUntil();
+  },
+
+  unlockFinanceSession(): number {
+    const until = Date.now() + FINANCE_UNLOCK_DURATION_MS;
+    try {
+      localStorage.setItem(FINANCE_UNLOCK_KEY, String(until));
+    } catch (e) {
+      console.error('Error saving finance unlock timestamp', e);
+    }
+    return until;
+  },
+
+  lockFinanceSession(): void {
+    try {
+      localStorage.removeItem(FINANCE_UNLOCK_KEY);
+    } catch (e) {
+      console.error('Error clearing finance unlock timestamp', e);
+    }
+  },
+
   exportAllData(): string {
     const backup = {
-      version: '1.2',
+      version: '1.3',
       exportDate: new Date().toISOString(),
       storeName: 'Yazır Optik',
       orders: this.getOrders(),
@@ -277,6 +391,8 @@ export const storage = {
       lensBrands: this.getLensBrands(),
       lensModels: this.getLensModels(),
       frameModels: this.getFrameModels(),
+      accounts: this.getAccounts(),
+      transactions: this.getTransactions(),
     };
     return JSON.stringify(backup, null, 2);
   },
@@ -305,6 +421,12 @@ export const storage = {
       if (Array.isArray(parsed.frameModels)) {
         this.saveFrameModels(parsed.frameModels);
       }
+      if (Array.isArray(parsed.accounts)) {
+        this.saveAccounts(parsed.accounts);
+      }
+      if (Array.isArray(parsed.transactions)) {
+        this.saveTransactions(parsed.transactions);
+      }
       return true;
     } catch (e) {
       console.error('Invalid JSON import', e);
@@ -320,5 +442,7 @@ export const storage = {
     localStorage.setItem(LENS_BRANDS_KEY, JSON.stringify(DEFAULT_LENS_BRANDS));
     localStorage.setItem(LENS_MODELS_KEY, JSON.stringify(DEFAULT_LENS_MODELS));
     localStorage.setItem(FRAME_MODELS_KEY, JSON.stringify(DEFAULT_FRAME_MODELS));
+    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(defaultAccounts));
+    localStorage.setItem(TRANSACTIONS_KEY, JSON.stringify(initialTransactions));
   },
 };
