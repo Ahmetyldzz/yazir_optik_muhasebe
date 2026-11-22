@@ -1,64 +1,66 @@
 import React, { useRef, useState } from 'react';
 import { Download, Upload, RefreshCw, X, Check, AlertCircle, Database } from 'lucide-react';
+import { api } from '../services/api';
 import { storage } from '../services/storage';
 import { ConfirmDialog } from './ConfirmDialog';
 
 interface BackupModalProps {
   onClose: () => void;
-  onDataRestored: () => void;
+  onRestore: (backup: unknown) => Promise<boolean>;
 }
 
-export const BackupModal: React.FC<BackupModalProps> = ({ onClose, onDataRestored }) => {
+export const BackupModal: React.FC<BackupModalProps> = ({ onClose, onRestore }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  const handleDownloadBackup = () => {
-    const dataStr = storage.exportAllData();
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+  const download = (data: string, name: string) => {
+    const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
     const link = document.createElement('a');
     link.href = url;
-    link.download = `yazir_optik_yedek_${new Date().toISOString().split('T')[0]}.json`;
+    link.download = name + '_' + new Date().toISOString().split('T')[0] + '.json';
     link.click();
-    URL.revokeObjectURL(url);
-    setSuccessMsg('Veri yedeği başarıyla bilgisayarınıza indirildi.');
-    setTimeout(() => setSuccessMsg(null), 3000);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleDownloadLegacy = () => {
+    setErrorMsg(null);
+    try {
+      download(storage.exportLegacyData(), 'yazir_optik_eski_tarayici_yedegi');
+    } catch {
+      setErrorMsg('Eski tarayıcı kayıtları okunamadı.');
+    }
+  };
+
+  const handleDownloadBackup = async () => {
+    setErrorMsg(null);
+    try {
+      download(JSON.stringify(await api('/backup'), null, 2), 'yazir_optik_yedek');
+      setSuccessMsg('Sunucu yedeği indirildi.');
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'Yedek alınamadı.');
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      const success = storage.importAllData(content);
-      if (success) {
-        setSuccessMsg('Yedek başarıyla yüklendi ve tüm veriler güncellendi!');
-        onDataRestored();
-        setTimeout(() => {
-          setSuccessMsg(null);
-          onClose();
-        }, 1500);
-      } else {
-        setErrorMsg('Dosya geçersiz veya bozuk. Lütfen geçerli bir Yazır Optik JSON yedeği yükleyin.');
-        setTimeout(() => setErrorMsg(null), 4000);
-      }
-    };
-    reader.readAsText(file);
+    setErrorMsg(null);
+    try {
+      const backup: unknown = JSON.parse(await file.text());
+      if (await onRestore(backup)) onClose();
+    } catch {
+      setErrorMsg('Geçerli bir Yazır Optik JSON yedeği seçin.');
+    }
   };
 
-  const confirmResetToDemo = () => {
-    setShowResetConfirm(false);
-    storage.resetToDefault();
-    onDataRestored();
-    setSuccessMsg('Örnek veriler başarıyla yüklendi.');
-    setTimeout(() => {
-      setSuccessMsg(null);
+  const confirmResetToDemo = async () => {
+    if (await onRestore(storage.getDemoBackup())) {
+      setShowResetConfirm(false);
       onClose();
-    }, 1500);
+    }
   };
 
   return (
@@ -102,6 +104,13 @@ export const BackupModal: React.FC<BackupModalProps> = ({ onClose, onDataRestore
               <Download className="w-4 h-4 text-cyan-400" />
               <span>Tam Yedek İndir (JSON Dosyası)</span>
             </button>
+
+            {storage.hasLegacyData() && (
+              <button type="button" className="text-sm text-cyan-700 underline"
+                onClick={handleDownloadLegacy}>
+                Eski tarayıcı kayıtlarının yedeğini indir
+              </button>
+            )}
 
             {/* Restore Backup */}
             <input

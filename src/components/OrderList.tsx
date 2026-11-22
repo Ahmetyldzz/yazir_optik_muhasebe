@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Search, Printer, MessageSquare, Eye, Edit3, Trash2, CheckCircle2,
+  Search, Printer, MessageSquare, Edit3, Trash2, CheckCircle2,
   X, Plus, Glasses
 } from 'lucide-react';
 import { SaleOrder, OrderStatus, Customer, EyeValues } from '../types/optical';
@@ -15,9 +15,9 @@ interface OrderListProps {
   filterStatus?: string;
   onSelectOrder: (order: SaleOrder) => void;
   onEditOrder: (order: SaleOrder) => void;
-  onDeleteOrder: (orderId: string) => void;
+  onDeleteOrder: (orderId: string) => Promise<boolean>;
   onPrintOrder: (order: SaleOrder) => void;
-  onUpdateStatus?: (orderId: string, status: OrderStatus) => void;
+  onUpdateStatus?: (orderId: string, status: OrderStatus) => Promise<boolean>;
   onNewOrderForCustomer?: (customer: Customer) => void;
 }
 
@@ -34,6 +34,7 @@ export const OrderList: React.FC<OrderListProps> = ({
   onEditOrder,
   onDeleteOrder,
   onPrintOrder,
+  onUpdateStatus,
   onNewOrderForCustomer,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,12 +43,18 @@ export const OrderList: React.FC<OrderListProps> = ({
     glasses: SaleOrder[];
   } | null>(null);
   const [pendingDeleteOrder, setPendingDeleteOrder] = useState<SaleOrder | null>(null);
+  const [pendingDeliverOrder, setPendingDeliverOrder] = useState<SaleOrder | null>(null);
+
+  const preparingOrders = useMemo(
+    () => orders.filter((order) => order.status !== 'teslim_edildi'),
+    [orders]
+  );
 
   const filteredOrders = useMemo(() => {
     const q = searchQuery.trim();
-    if (!q) return orders;
+    if (!q) return preparingOrders;
 
-    return orders.filter((order) => {
+    return preparingOrders.filter((order) => {
       const matchName = searchMatches(order.customer.fullName, q);
       const matchTC = numberMatches(order.customer.tcNo, q);
       const matchPhone = numberMatches(order.customer.phone, q);
@@ -65,7 +72,7 @@ export const OrderList: React.FC<OrderListProps> = ({
         matchLensModel || matchNearLensModel || matchOrderNo
       );
     });
-  }, [orders, searchQuery]);
+  }, [preparingOrders, searchQuery]);
 
   const handleWhatsApp = (order: SaleOrder) => {
     const cleanPhone = order.customer.phone.replace(/\D/g, '');
@@ -146,21 +153,24 @@ export const OrderList: React.FC<OrderListProps> = ({
           const r = forYakinOnly ? (nearRight || distRight) : distRight;
           const l = forYakinOnly ? (nearLeft || distLeft) : distLeft;
           return (
-            <div className="grid grid-cols-[54px_repeat(3,minmax(0,1fr))] gap-x-1.5 gap-y-0.5 items-center text-[11px] font-mono">
+            <div className="grid grid-cols-[52px_repeat(4,minmax(0,1fr))] gap-x-1 gap-y-0.5 items-center text-[11px] font-mono">
               <span className={`text-[9px] font-sans font-bold uppercase ${forYakinOnly ? 'text-amber-700/70' : 'text-slate-400'}`}>Göz</span>
               <span className={`text-[9px] font-sans font-bold uppercase text-center ${forYakinOnly ? 'text-amber-700/70' : 'text-slate-400'}`}>SPH</span>
               <span className={`text-[9px] font-sans font-bold uppercase text-center ${forYakinOnly ? 'text-amber-700/70' : 'text-slate-400'}`}>CYL</span>
               <span className={`text-[9px] font-sans font-bold uppercase text-center ${forYakinOnly ? 'text-amber-700/70' : 'text-slate-400'}`}>AKS</span>
+              <span className={`text-[9px] font-sans font-bold uppercase text-center ${forYakinOnly ? 'text-amber-700/70' : 'text-slate-400'}`}>PD</span>
 
               <span className={`font-bold font-sans whitespace-nowrap ${forYakinOnly ? 'text-amber-900' : 'text-blue-700'}`}>Sağ (OD)</span>
               <span className="font-bold text-slate-900 text-center">{r?.sph || '0'}</span>
               <span className="text-slate-700 text-center">{r?.cyl || '0'}</span>
               <span className="text-slate-700 text-center">{r?.axis ? `${r.axis}°` : '-'}</span>
+              <span className="text-slate-700 text-center">{r?.pd || '-'}</span>
 
               <span className={`font-bold font-sans whitespace-nowrap ${forYakinOnly ? 'text-orange-900' : 'text-indigo-700'}`}>Sol (OS)</span>
               <span className="font-bold text-slate-900 text-center">{l?.sph || '0'}</span>
               <span className="text-slate-700 text-center">{l?.cyl || '0'}</span>
               <span className="text-slate-700 text-center">{l?.axis ? `${l.axis}°` : '-'}</span>
+              <span className="text-slate-700 text-center">{l?.pd || '-'}</span>
             </div>
           );
         })()}
@@ -170,34 +180,39 @@ export const OrderList: React.FC<OrderListProps> = ({
     const renderNearBox = () => (
       <div className="w-full h-full flex flex-col justify-between bg-amber-50/70 border border-amber-200 rounded-lg px-2.5 py-1.5 gap-1">
         <div className="text-[10px] font-sans font-black text-amber-900">Yakın Numaralar:</div>
-        <div className="grid grid-cols-[54px_repeat(3,minmax(0,1fr))] gap-x-1.5 gap-y-0.5 items-center text-[11px] font-mono">
+        <div className="grid grid-cols-[52px_repeat(4,minmax(0,1fr))] gap-x-1 gap-y-0.5 items-center text-[11px] font-mono">
           <span className="text-[9px] font-sans font-bold uppercase text-amber-700/70">Göz</span>
           <span className="text-[9px] font-sans font-bold uppercase text-amber-700/70 text-center">SPH</span>
           <span className="text-[9px] font-sans font-bold uppercase text-amber-700/70 text-center">CYL</span>
           <span className="text-[9px] font-sans font-bold uppercase text-amber-700/70 text-center">AKS</span>
+          <span className="text-[9px] font-sans font-bold uppercase text-amber-700/70 text-center">PD</span>
 
           <span className="font-bold text-amber-900 font-sans whitespace-nowrap">Sağ (OD)</span>
           <span className="font-bold text-slate-900 text-center">{nearRight?.sph || '0'}</span>
           <span className="text-slate-700 text-center">{nearRight?.cyl || '0'}</span>
           <span className="text-slate-700 text-center">{nearRight?.axis ? `${nearRight.axis}°` : '-'}</span>
+          <span className="text-slate-700 text-center">{nearRight?.pd || '-'}</span>
 
           <span className="font-bold text-orange-900 font-sans whitespace-nowrap">Sol (OS)</span>
           <span className="font-bold text-slate-900 text-center">{nearLeft?.sph || '0'}</span>
           <span className="text-slate-700 text-center">{nearLeft?.cyl || '0'}</span>
           <span className="text-slate-700 text-center">{nearLeft?.axis ? `${nearLeft.axis}°` : '-'}</span>
+          <span className="text-slate-700 text-center">{nearLeft?.pd || '-'}</span>
         </div>
       </div>
     );
 
     if (isBothUzakYakin) {
       const uzakHeader = (
-        <div className="flex flex-wrap items-baseline gap-1 leading-tight">
-          <span className="font-black text-blue-900 text-xs">Uzak:</span>
-          <span className="font-black text-slate-950 text-sm">
-            {rx.lensBrand || '-'}
-          </span>
+        <div className="flex flex-col gap-0.5 leading-tight min-w-0">
+          <div className="flex flex-wrap items-baseline gap-x-1 leading-tight">
+            <span className="font-black text-blue-900 text-xs shrink-0">Uzak:</span>
+            <span className="font-black text-slate-950 text-sm break-words">
+              {rx.lensBrand || '-'}
+            </span>
+          </div>
           {(rx.lensModel || rx.lensType) && (
-            <span className="text-slate-600 text-xs font-semibold">
+            <span className="text-slate-600 text-xs font-semibold break-words">
               ({rx.lensModel || rx.lensType})
             </span>
           )}
@@ -205,13 +220,15 @@ export const OrderList: React.FC<OrderListProps> = ({
       );
 
       const yakinHeader = (
-        <div className="flex flex-wrap items-baseline gap-1 leading-tight">
-          <span className="font-black text-amber-900 text-xs">Yakın:</span>
-          <span className="font-black text-slate-950 text-sm">
-            {rx.nearLensBrand || rx.lensBrand || '-'}
-          </span>
+        <div className="flex flex-col gap-0.5 leading-tight min-w-0">
+          <div className="flex flex-wrap items-baseline gap-x-1 leading-tight">
+            <span className="font-black text-amber-900 text-xs shrink-0">Yakın:</span>
+            <span className="font-black text-slate-950 text-sm break-words">
+              {rx.nearLensBrand || rx.lensBrand || '-'}
+            </span>
+          </div>
           {rx.nearLensModel && (
-            <span className="text-slate-600 text-xs font-semibold">
+            <span className="text-slate-600 text-xs font-semibold break-words">
               ({rx.nearLensModel})
             </span>
           )}
@@ -234,11 +251,23 @@ export const OrderList: React.FC<OrderListProps> = ({
       }
 
       return (
-        <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 w-full max-w-[490px] items-stretch">
-          <div className="flex items-end">{uzakHeader}</div>
-          <div className="flex items-end">{yakinHeader}</div>
-          {hasDistNumbers ? renderDistBox(true, false) : <div />}
-          {hasNearNumbers ? renderNearBox() : <div />}
+        <div className="w-full max-w-[580px]">
+          <div className="hidden min-[840px]:grid grid-cols-2 gap-x-2.5 gap-y-1.5 items-stretch">
+            <div className="flex items-start min-w-0">{uzakHeader}</div>
+            <div className="flex items-start min-w-0">{yakinHeader}</div>
+            {hasDistNumbers ? renderDistBox(true, false) : <div />}
+            {hasNearNumbers ? renderNearBox() : <div />}
+          </div>
+          <div className="min-[840px]:hidden space-y-2.5">
+            <div className="space-y-1">
+              {uzakHeader}
+              {hasDistNumbers && renderDistBox(true, false)}
+            </div>
+            <div className="space-y-1">
+              {yakinHeader}
+              {hasNearNumbers && renderNearBox()}
+            </div>
+          </div>
         </div>
       );
     }
@@ -263,8 +292,8 @@ export const OrderList: React.FC<OrderListProps> = ({
             isStackedMobile
               ? 'grid-cols-1'
               : hasTwoBoxes
-                ? 'grid-cols-2 max-w-[490px]'
-                : 'grid-cols-1 max-w-[241px]'
+                ? 'grid-cols-1 min-[840px]:grid-cols-2 max-w-[580px]'
+                : 'grid-cols-1 max-w-[290px]'
           }`}>
             {(isOnlyYakin ? (hasNearNumbers || hasDistNumbers) : hasDistNumbers) &&
               renderDistBox(isProgresif, isOnlyYakin)}
@@ -288,20 +317,23 @@ export const OrderList: React.FC<OrderListProps> = ({
         </button>
 
         <button
-          onClick={() => onSelectOrder(order)}
-          className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 transition-colors cursor-pointer"
-          title="İncele"
-        >
-          <Eye className="w-4 h-4 text-blue-700" />
-        </button>
-
-        <button
           onClick={() => onEditOrder(order)}
           className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 transition-colors cursor-pointer"
           title="Düzenle"
         >
           <Edit3 className="w-4 h-4 text-amber-700" />
         </button>
+
+        {onUpdateStatus && (
+          <button
+            type="button"
+            onClick={() => setPendingDeliverOrder(order)}
+            className="p-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors cursor-pointer"
+            title="Teslim Edildi Onayı"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+          </button>
+        )}
 
         <button
           type="button"
@@ -337,7 +369,7 @@ export const OrderList: React.FC<OrderListProps> = ({
             <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
               <span>Hazırlanan Gözlükler</span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-cyan-100 text-cyan-950 border border-cyan-300">
-                {orders.length} Kayıt
+                {preparingOrders.length} Kayıt
               </span>
             </h3>
           </div>
@@ -398,9 +430,9 @@ export const OrderList: React.FC<OrderListProps> = ({
                 <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase tracking-wider text-[11px]">
                   <th className="py-3.5 px-4 w-[22%]">Müşteri Bilgisi (TC / Tel)</th>
                   <th className="py-3.5 px-4 w-[16%]">Verdiğim Çerçeve</th>
-                  <th className="py-3.5 px-4 w-[38%]">Verdiğim Cam & Numaraları</th>
+                  <th className="py-3.5 px-4 w-[36%]">Verdiğim Cam & Numaraları</th>
                   <th className="py-3.5 px-4 w-[12%] text-right">Fiyat (Çerçeve + Cam)</th>
-                  <th className="py-3.5 px-4 w-[12%] text-right">İşlemler</th>
+                  <th className="py-3.5 px-4 w-[14%] text-right">İşlemler</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -591,7 +623,7 @@ export const OrderList: React.FC<OrderListProps> = ({
 
                   {/* Card Body: Çerçeve (Sol) + Cam & Numaralar (Sağ) */}
                   <div className="grid grid-cols-[165px_1fr] gap-4 items-start">
-                    <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/80 text-xs">
+                    <div className="text-xs">
                       <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
                         Verdiğim Çerçeve
                       </span>
@@ -604,6 +636,11 @@ export const OrderList: React.FC<OrderListProps> = ({
                       {order.frame.colorCode && (
                         <span className="text-[11px] text-slate-500 block mt-0.5">
                           Renk: {order.frame.colorCode}
+                        </span>
+                      )}
+                      {order.frame.size && (
+                        <span className="text-[10px] font-mono text-slate-400 block">
+                          Ölçü: {order.frame.size}
                         </span>
                       )}
                     </div>
@@ -676,13 +713,13 @@ export const OrderList: React.FC<OrderListProps> = ({
                   </div>
 
                   {/* 2. Çerçeve & Fiyat Satırı */}
-                  <div className="grid grid-cols-2 gap-2.5 bg-slate-50 rounded-xl p-2.5 border border-slate-200/80">
+                  <div className="grid grid-cols-2 gap-2.5 pb-2.5 border-b border-slate-100">
                     <div className="min-w-0">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Çerçeve</span>
-                      <span className="font-black text-slate-900 block truncate">{order.frame.brand}</span>
-                      <span className="text-slate-700 block truncate">{order.frame.model || '-'}</span>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Verdiğim Çerçeve</span>
+                      <span className="font-black text-slate-900 text-sm block truncate">{order.frame.brand}</span>
+                      <span className="text-slate-700 block truncate">{order.frame.model || 'Model Belirtilmedi'}</span>
                       {order.frame.colorCode && (
-                        <span className="text-[10px] text-slate-500 block truncate">{order.frame.colorCode}</span>
+                        <span className="text-[10px] text-slate-500 block truncate">Renk: {order.frame.colorCode}</span>
                       )}
                     </div>
 
@@ -825,6 +862,26 @@ export const OrderList: React.FC<OrderListProps> = ({
       )}
 
       <ConfirmDialog
+        isOpen={Boolean(pendingDeliverOrder)}
+        variant="confirm"
+        title="Gözlük Teslim Onayı"
+        message={
+          pendingDeliverOrder
+            ? `${pendingDeliverOrder.customer.fullName} adına kayıtlı bu gözlük (${pendingDeliverOrder.orderNo}) teslim edildi mi? Onaylandığında Hazırlanan Gözlükler listesinden kaldırılacaktır.`
+            : ''
+        }
+        confirmLabel="Evet, Teslim Edildi"
+        cancelLabel="Vazgeç"
+        onConfirm={async () => {
+          if (pendingDeliverOrder && onUpdateStatus) {
+            if (!await onUpdateStatus(pendingDeliverOrder.id, 'teslim_edildi')) return;
+            setPendingDeliverOrder(null);
+          }
+        }}
+        onCancel={() => setPendingDeliverOrder(null)}
+      />
+
+      <ConfirmDialog
         isOpen={Boolean(pendingDeleteOrder)}
         title="Gözlük Kaydını Sil"
         message={
@@ -832,9 +889,9 @@ export const OrderList: React.FC<OrderListProps> = ({
             ? `${pendingDeleteOrder.customer.fullName} adına kayıtlı gözlük siparişini (${pendingDeleteOrder.orderNo}) silmek istediğinize emin misiniz?`
             : ''
         }
-        onConfirm={() => {
+        onConfirm={async () => {
           if (pendingDeleteOrder) {
-            onDeleteOrder(pendingDeleteOrder.id);
+            if (!await onDeleteOrder(pendingDeleteOrder.id)) return;
             setPendingDeleteOrder(null);
           }
         }}

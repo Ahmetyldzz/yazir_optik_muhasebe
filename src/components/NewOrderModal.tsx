@@ -3,8 +3,9 @@ import {
   X, Glasses, User, Eye, Tag, DollarSign, Check, History, Copy, AlertCircle
 } from 'lucide-react';
 import {
-  SaleOrder, Customer, GlassesUsageType, UsageOption, EyeValues
+  SaleOrder, Customer, GlassesUsageType, UsageOption, EyeValues, CashAccount
 } from '../types/optical';
+import type { Catalogs } from '../services/api';
 import {
   formatDate, formatCurrency, formatPhoneInput,
   getCustomerOrderList, getOrderIndexForCustomer
@@ -14,7 +15,9 @@ interface NewOrderModalProps {
   initialOrder?: SaleOrder | null;
   customers: Customer[];
   orders: SaleOrder[];
-  onSave: (order: SaleOrder) => void;
+  accounts: CashAccount[];
+  catalogs: Catalogs;
+  onSave: (order: SaleOrder) => Promise<boolean>;
   onClose: () => void;
 }
 
@@ -34,6 +37,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   initialOrder,
   customers,
   orders,
+  accounts,
+  catalogs,
   onSave,
   onClose,
 }) => {
@@ -126,6 +131,10 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   );
   const [orderDate, setOrderDate] = useState(
     initialOrder?.orderDate || new Date().toISOString().split('T')[0]
+  );
+  const [paidAmountInput, setPaidAmountInput] = useState(initialOrder?.id ? String(initialOrder.paidAmount) : '');
+  const [accountId, setAccountId] = useState<string>(
+    initialOrder?.accountId || accounts[0]?.id || ''
   );
   const [notes, setNotes] = useState(initialOrder?.notes || '');
 
@@ -262,7 +271,12 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
     const fp = parseFloat(framePriceInput) || 0;
     const lp = parseFloat(lensPriceInput) || 0;
-    const finalSalePrice = fp + lp;
+    const finalSalePrice = (Math.round(fp * 100) + Math.round(lp * 100)) / 100;
+    const paidAmount = paidAmountInput === '' ? finalSalePrice : Number(paidAmountInput);
+    if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+      setFormError('Geçerli bir tahsilat tutarı giriniz.');
+      return;
+    }
 
     if (finalSalePrice <= 0) {
       setFormError('Lütfen gözlük veya cam fiyatını giriniz.');
@@ -271,31 +285,31 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
     const distPair = {
       rightEye: {
-        sph: distRSph.trim(),
-        cyl: distRCyl.trim(),
-        axis: distRAxis.trim(),
-        pd: distRPd.trim(),
+        sph: distRSph.trim().slice(0, 8),
+        cyl: distRCyl.trim().slice(0, 8),
+        axis: distRAxis.trim().slice(0, 8),
+        pd: distRPd.trim().slice(0, 8),
       },
       leftEye: {
-        sph: distLSph.trim(),
-        cyl: distLCyl.trim(),
-        axis: distLAxis.trim(),
-        pd: distLPd.trim(),
+        sph: distLSph.trim().slice(0, 8),
+        cyl: distLCyl.trim().slice(0, 8),
+        axis: distLAxis.trim().slice(0, 8),
+        pd: distLPd.trim().slice(0, 8),
       },
     };
 
     const nearPair = {
       rightEye: {
-        sph: nearRSph.trim(),
-        cyl: nearRCyl.trim(),
-        axis: nearRAxis.trim(),
-        pd: nearRPd.trim(),
+        sph: nearRSph.trim().slice(0, 8),
+        cyl: nearRCyl.trim().slice(0, 8),
+        axis: nearRAxis.trim().slice(0, 8),
+        pd: nearRPd.trim().slice(0, 8),
       },
       leftEye: {
-        sph: nearLSph.trim(),
-        cyl: nearLCyl.trim(),
-        axis: nearLAxis.trim(),
-        pd: nearLPd.trim(),
+        sph: nearLSph.trim().slice(0, 8),
+        cyl: nearLCyl.trim().slice(0, 8),
+        axis: nearLAxis.trim().slice(0, 8),
+        pd: nearLPd.trim().slice(0, 8),
       },
     };
 
@@ -322,6 +336,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       id: orderId,
       orderNo: orderNumber,
       customer: {
+        ...initialOrder?.customer,
         id: initialOrder?.customer.id || `cust-${Date.now()}`,
         fullName: fullName.trim(),
         tcNo: cleanTc,
@@ -329,6 +344,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         createdAt: initialOrder?.customer.createdAt || new Date().toISOString(),
       },
       prescription: {
+        ...initialOrder?.prescription,
         usageType: resolvedUsageType,
         usageTypes,
         rightEye: primaryRx.rightEye,
@@ -336,36 +352,39 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         distanceRx: (hasUzak || isProgresif) ? distPair : undefined,
         nearRx: (hasYakin || isProgresif) ? nearPair : undefined,
         lensType: primaryModel || 'Standart',
-        lensFeatures: [],
+        lensFeatures: initialOrder?.prescription.lensFeatures ?? [],
         lensBrand: primaryBrand,
         lensModel: primaryModel,
         nearLensBrand: (hasUzak && hasYakin) ? nearLensBrand.trim() : undefined,
         nearLensModel: (hasUzak && hasYakin) ? nearLensModel.trim() : undefined,
-        lensIndex: '',
+        lensIndex: initialOrder?.prescription.lensIndex ?? '',
       },
       frame: {
+        ...initialOrder?.frame,
         brand: frameBrand.trim() || 'Genel Çerçeve',
         model: frameModel.trim(),
         colorCode: frameColor.trim(),
         size: initialOrder?.frame.size || '',
-        type: 'numarali',
+        type: initialOrder?.frame.type ?? 'numarali',
       },
       framePrice: fp,
       lensPrice: lp,
-      costPrice: 0,
+      costPrice: initialOrder?.costPrice ?? 0,
       listPrice: finalSalePrice,
       salePrice: finalSalePrice,
-      paidAmount: finalSalePrice,
-      remainingAmount: 0,
+      paidAmount,
+      remainingAmount: Math.max(0, finalSalePrice - paidAmount),
+      deliveryDate: initialOrder?.deliveryDate,
+      paymentMethod: initialOrder?.paymentMethod,
+      accountId,
       status: initialOrder?.status || 'hazirlaniyor',
       orderDate,
-      warrantyMonths: 24,
+      warrantyMonths: initialOrder?.warrantyMonths ?? 24,
       notes: notes.trim(),
       createdAt: isEditingExisting ? (initialOrder?.createdAt || new Date().toISOString()) : new Date().toISOString(),
     };
 
-    onSave(newOrder);
-    onClose();
+    void onSave(newOrder);
   };
 
   return (
@@ -403,6 +422,9 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="overflow-y-auto p-6 space-y-5">
+          <datalist id="order-frame-models">{catalogs.frameModels.map(value => <option key={value} value={value} />)}</datalist>
+          <datalist id="order-lens-brands">{catalogs.lensBrands.map(value => <option key={value} value={value} />)}</datalist>
+          <datalist id="order-lens-models">{catalogs.lensModels.map(value => <option key={value} value={value} />)}</datalist>
           {formError && (
             <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl text-xs font-bold">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
@@ -443,12 +465,12 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   <span>Önceki: {latestPreviousOrder.frame.brand} {latestPreviousOrder.frame.model}</span>
                   <span>{formatDate(latestPreviousOrder.orderDate)} • {formatCurrency(latestPreviousOrder.salePrice)}</span>
                 </div>
-                <div className="font-mono text-[11px] flex justify-between bg-slate-50 p-1.5 rounded">
+                <div className="font-mono text-[11px] flex flex-col mid:flex-row mid:justify-between gap-1 bg-slate-50 p-1.5 rounded">
                   <span className="text-blue-700 font-bold">
-                    Sağ: {latestPreviousOrder.prescription.rightEye?.sph || '0'} (Cyl: {latestPreviousOrder.prescription.rightEye?.cyl || '0'} Aks: {latestPreviousOrder.prescription.rightEye?.axis || '0'}°)
+                    Sağ: {latestPreviousOrder.prescription.rightEye?.sph || '0'} (Cyl: {latestPreviousOrder.prescription.rightEye?.cyl || '0'} Aks: {latestPreviousOrder.prescription.rightEye?.axis || '0'}° PD: {latestPreviousOrder.prescription.rightEye?.pd || '-'})
                   </span>
                   <span className="text-indigo-700 font-bold">
-                    Sol: {latestPreviousOrder.prescription.leftEye?.sph || '0'} (Cyl: {latestPreviousOrder.prescription.leftEye?.cyl || '0'} Aks: {latestPreviousOrder.prescription.leftEye?.axis || '0'}°)
+                    Sol: {latestPreviousOrder.prescription.leftEye?.sph || '0'} (Cyl: {latestPreviousOrder.prescription.leftEye?.cyl || '0'} Aks: {latestPreviousOrder.prescription.leftEye?.axis || '0'}° PD: {latestPreviousOrder.prescription.leftEye?.pd || '-'})
                   </span>
                 </div>
               </div>
@@ -555,7 +577,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={frameModel}
+                  list="order-frame-models"
+                        value={frameModel}
                   onChange={(e) => setFrameModel(e.target.value)}
                   placeholder="Model adı"
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:bg-white focus:border-cyan-500 outline-none"
@@ -655,6 +678,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                       <input
                         type="text"
                         required
+                        list="order-lens-brands"
                         value={distanceLensBrand}
                         onChange={(e) => setDistanceLensBrand(e.target.value)}
                         placeholder="Cam markası adı"
@@ -667,6 +691,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                       </label>
                       <input
                         type="text"
+                        list="order-lens-models"
                         value={distanceLensModel}
                         onChange={(e) => setDistanceLensModel(e.target.value)}
                         placeholder="Model adı"
@@ -724,7 +749,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     <input
                       type="text"
                       required
-                      value={distanceLensBrand}
+                      list="order-lens-brands"
+                        value={distanceLensBrand}
                       onChange={(e) => setDistanceLensBrand(e.target.value)}
                       placeholder="Cam markası adı"
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-black text-slate-950 focus:border-blue-500 outline-none"
@@ -737,7 +763,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     </label>
                     <input
                       type="text"
-                      value={distanceLensModel}
+                      list="order-lens-models"
+                        value={distanceLensModel}
                       onChange={(e) => setDistanceLensModel(e.target.value)}
                       placeholder="Model adı"
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-950 focus:border-blue-500 outline-none"
@@ -780,7 +807,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     <input
                       type="text"
                       required
-                      value={nearLensBrand}
+                      list="order-lens-brands"
+                        value={nearLensBrand}
                       onChange={(e) => setNearLensBrand(e.target.value)}
                       placeholder="Cam markası adı"
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-black text-slate-950 focus:border-amber-500 outline-none"
@@ -793,7 +821,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     </label>
                     <input
                       type="text"
-                      value={nearLensModel}
+                      list="order-lens-models"
+                        value={nearLensModel}
                       onChange={(e) => setNearLensModel(e.target.value)}
                       placeholder="Model adı"
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-950 focus:border-amber-500 outline-none"
@@ -834,7 +863,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                 <input
                   type="number"
                   min="0"
-                  step="any"
+                  step="0.01"
                   value={framePriceInput}
                   onChange={(e) => setFramePriceInput(e.target.value)}
                   placeholder="örn: 2000"
@@ -849,7 +878,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                 <input
                   type="number"
                   min="0"
-                  step="any"
+                  step="0.01"
                   value={lensPriceInput}
                   onChange={(e) => setLensPriceInput(e.target.value)}
                   placeholder="örn: 3000"
@@ -869,6 +898,54 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                 <div className="text-[10px] text-cyan-100 font-medium">
                   {parseFloat(framePriceInput) || 0} ₺ Çerçeve + {parseFloat(lensPriceInput) || 0} ₺ Cam
                 </div>
+              </div>
+            </div>
+
+            <label className="block text-xs font-semibold text-slate-700">
+            Tahsil edilen tutar (₺)
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={paidAmountInput}
+              placeholder="Satış toplamı"
+              onChange={(event) => setPaidAmountInput(event.target.value)}
+              className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+            />
+          </label>
+
+          {/* Ödeme Alınan Hesap (3 Kişi + Ortak) */}
+            <div className="pt-2 border-t border-cyan-100">
+              <label className="text-xs font-bold text-slate-800 block mb-1.5">
+                Tahsilat Hesabı (Para Hangi Hesaba Girdi?)
+              </label>
+              <div className="grid grid-cols-2 mid:grid-cols-4 gap-2">
+                {accounts.map((acc) => {
+                  const selected = accountId === acc.id;
+                  const activeClasses =
+                    acc.color === 'cyan'
+                      ? 'bg-cyan-600 text-white border-cyan-700 shadow-xs'
+                      : acc.color === 'indigo'
+                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                        : acc.color === 'emerald'
+                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                          : 'bg-amber-600 text-white border-amber-700 shadow-xs';
+                  return (
+                    <button
+                      key={acc.id}
+                      type="button"
+                      onClick={() => setAccountId(acc.id)}
+                      className={`px-3 py-2 rounded-lg border text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        selected
+                          ? activeClasses
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      {selected && <Check className="w-3.5 h-3.5 stroke-[3] shrink-0" />}
+                      <span className="truncate">{acc.name}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -977,7 +1054,7 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
           {title}
         </span>
         <span className={`text-[11px] ${isAmber ? 'text-amber-800/80' : 'text-slate-500'}`}>
-          SPH (Küre) • CYL (Silindir) • AKS (Açı 0°-180°)
+          SPH (Küre) • CYL (Silindir) • AKS (Açı 0°-180°) • PD (mm)
         </span>
       </div>
 
@@ -1000,8 +1077,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={rSph}
-                  onChange={(e) => setRSph(e.target.value)}
+                  onChange={(e) => setRSph(e.target.value.slice(0, 8))}
                   placeholder="+1.50 / -2.00"
                   className={sphInputClass}
                 />
@@ -1009,8 +1087,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={rCyl}
-                  onChange={(e) => setRCyl(e.target.value)}
+                  onChange={(e) => setRCyl(e.target.value.slice(0, 8))}
                   placeholder="-0.75"
                   className={inputBaseClass}
                 />
@@ -1018,8 +1097,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={rAxis}
-                  onChange={(e) => setRAxis(e.target.value)}
+                  onChange={(e) => setRAxis(e.target.value.slice(0, 8))}
                   placeholder="90"
                   className={inputBaseClass}
                 />
@@ -1027,8 +1107,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={rPd}
-                  onChange={(e) => setRPd(e.target.value)}
+                  onChange={(e) => setRPd(e.target.value.slice(0, 8))}
                   placeholder="31.5"
                   className={inputBaseClass}
                 />
@@ -1042,8 +1123,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={lSph}
-                  onChange={(e) => setLSph(e.target.value)}
+                  onChange={(e) => setLSph(e.target.value.slice(0, 8))}
                   placeholder="+1.25 / -2.50"
                   className={sphInputClass}
                 />
@@ -1051,8 +1133,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={lCyl}
-                  onChange={(e) => setLCyl(e.target.value)}
+                  onChange={(e) => setLCyl(e.target.value.slice(0, 8))}
                   placeholder="-0.50"
                   className={inputBaseClass}
                 />
@@ -1060,8 +1143,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={lAxis}
-                  onChange={(e) => setLAxis(e.target.value)}
+                  onChange={(e) => setLAxis(e.target.value.slice(0, 8))}
                   placeholder="85"
                   className={inputBaseClass}
                 />
@@ -1069,8 +1153,9 @@ const PrescriptionNumberTable: React.FC<PrescriptionNumberTableProps> = ({
               <td className="p-1">
                 <input
                   type="text"
+                  maxLength={8}
                   value={lPd}
-                  onChange={(e) => setLPd(e.target.value)}
+                  onChange={(e) => setLPd(e.target.value.slice(0, 8))}
                   placeholder="31.0"
                   className={inputBaseClass}
                 />

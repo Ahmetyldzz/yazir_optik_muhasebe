@@ -1,13 +1,14 @@
 import React from 'react';
-import { Glasses, Plus, Users, LayoutDashboard, BarChart3, Settings, Database, ShieldCheck } from 'lucide-react';
+import { Glasses, Plus, Users, LayoutDashboard, BarChart3, Settings, Database, ShieldCheck, Lock } from 'lucide-react';
 import { StoreSettings } from '../types/optical';
 
-export type ActiveTabType = 'orders' | 'customers' | 'finance';
+export type ActiveTabType = 'orders' | 'customers' | 'finance' | 'inventory';
 
 interface HeaderProps {
   settings: StoreSettings;
   activeTab: ActiveTabType;
   setActiveTab: (tab: ActiveTabType) => void;
+  isFinanceUnlocked?: boolean;
   onOpenNewOrder: () => void;
   onOpenAdminPanel: () => void;
   onOpenBackup: () => void;
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   settings,
   activeTab,
   setActiveTab,
+  isFinanceUnlocked = false,
   onOpenNewOrder,
   onOpenAdminPanel,
   onOpenBackup,
@@ -146,6 +148,15 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('inventory')}
+            aria-current={activeTab === 'inventory' ? 'page' : undefined}
+            className={'px-3 mid:px-4 desk:px-5 py-2.5 text-xs desk:text-sm font-semibold border-b-2 whitespace-nowrap shrink-0 ' +
+              (activeTab === 'inventory' ? 'border-cyan-400 text-cyan-300 bg-slate-800/50' : 'border-transparent text-slate-400 hover:text-slate-200')}
+          >
+            Stok
+          </button>
+
+          <button
             onClick={() => setActiveTab('finance')}
             className={`flex items-center gap-1.5 desk:gap-2 px-3 mid:px-4 desk:px-5 py-2.5 text-xs desk:text-sm font-semibold border-b-2 transition-all whitespace-nowrap cursor-pointer shrink-0 ${
               activeTab === 'finance'
@@ -155,6 +166,9 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <BarChart3 className="w-4 h-4 text-cyan-400 shrink-0" />
             <span>Ciro & Kasa Özeti</span>
+            {!isFinanceUnlocked && (
+              <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            )}
           </button>
         </div>
       </div>

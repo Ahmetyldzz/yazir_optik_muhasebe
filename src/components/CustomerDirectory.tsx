@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
   Users, Search, Phone, MessageSquare, Plus, Eye,
-  Edit3, Check, UserPlus, Copy, X
+  Edit3, Check, UserPlus, Copy, X, CheckCircle2
 } from 'lucide-react';
 import { Customer, SaleOrder } from '../types/optical';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -13,8 +13,8 @@ import {
 interface CustomerDirectoryProps {
   customers: Customer[];
   orders: SaleOrder[];
-  onSaveCustomer: (customer: Customer) => void;
-  onDeleteCustomer: (customerId: string) => void;
+  onSaveCustomer: (customer: Customer) => Promise<boolean>;
+  onDeleteCustomer: (customerId: string) => Promise<boolean>;
   onNewOrderForCustomer: (customer: Customer) => void;
   onViewOrder: (order: SaleOrder) => void;
 }
@@ -39,15 +39,19 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
 
-  // List all customers (no status filtering since durum takibi is removed)
+  // Only show delivered glasses; hide customers whose orders are all still undelivered
   const customersWithOrders = useMemo(() => {
     const list: { customer: Customer; custOrders: SaleOrder[]; latestDate: string }[] = [];
 
     customers.forEach((cust) => {
-      const custOrders = getCustomerOrderList(orders, cust);
-      const latestOrder = custOrders[custOrders.length - 1];
-      const latestDate = latestOrder?.orderDate || latestOrder?.createdAt || cust.createdAt;
-      list.push({ customer: cust, custOrders, latestDate });
+      const allCustOrders = getCustomerOrderList(orders, cust);
+      const deliveredOrders = allCustOrders.filter((o) => o.status === 'teslim_edildi');
+      if (deliveredOrders.length === 0 && allCustOrders.length > 0) {
+        return;
+      }
+      const latestOrder = deliveredOrders[deliveredOrders.length - 1];
+      const latestDate = latestOrder?.deliveryDate || latestOrder?.orderDate || latestOrder?.createdAt || cust.createdAt;
+      list.push({ customer: cust, custOrders: deliveredOrders, latestDate });
     });
 
     list.sort((a, b) => new Date(b.latestDate).getTime() - new Date(a.latestDate).getTime());
@@ -100,7 +104,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
     setShowEditModal(true);
   };
 
-  const handleSaveCustomerForm = (e: React.FormEvent) => {
+  const handleSaveCustomerForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) return;
 
@@ -113,7 +117,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
       createdAt: editingCustomer?.createdAt || new Date().toISOString(),
     };
 
-    onSaveCustomer(saved);
+    if (!await onSaveCustomer(saved)) return;
     if (selectedCustomer && selectedCustomer.id === saved.id) {
       setSelectedCustomer(saved);
     }
@@ -151,7 +155,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Varsayılan olarak <strong>son 10 müşteri</strong> görünür; tüm kayıtlara T.C. veya isimle arayarak ulaşabilirsiniz.
+              Yalnızca <strong>teslim edilen gözlükleri</strong> olan müşteriler burada listelenir (varsayılan son 10 müşteri); tüm kayıtlara T.C. veya isimle arayarak ulaşabilirsiniz.
             </p>
           </div>
         </div>
@@ -299,20 +303,26 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
                     )}
                   </div>
 
-                  {/* Glasses Preview */}
+                  {/* Glasses Preview (Delivered Only) */}
                   {custOrders.length > 1 ? (
                     <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-200/80 mb-3 text-xs space-y-1.5">
                       <div className="flex items-center justify-between text-amber-900 text-[11px] font-black uppercase">
-                        <span>Verilen Gözlükler ({custOrders.length})</span>
-                        <span>Son: {formatDate(latestOrder.orderDate)}</span>
+                        <span>Teslim Edilen Gözlükler ({custOrders.length})</span>
+                        <span>Son: {formatDate(latestOrder.deliveryDate || latestOrder.orderDate)}</span>
                       </div>
                       <div className="space-y-1">
                         {custOrders.map((ord, idx) => (
-                          <div key={ord.id} className="flex items-center justify-between bg-white px-2 py-1 rounded border border-amber-200 text-[11px]">
-                            <span className="font-bold text-slate-900">
-                              {idx + 1}. Gözlük: {ord.frame.brand} ({ord.prescription.lensBrand || 'Zeiss'})
-                            </span>
-                            <span className="font-semibold text-slate-700">
+                          <div key={ord.id} className="flex items-center justify-between gap-2 bg-white px-2 py-1.5 rounded border border-amber-200 text-[11px]">
+                            <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-slate-900 truncate">
+                                {idx + 1}. Gözlük: {ord.frame.brand} ({ord.prescription.lensBrand || 'Zeiss'})
+                              </span>
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-200 text-[9px] font-black shrink-0">
+                                <CheckCircle2 className="w-2.5 h-2.5" />
+                                Teslim Edildi
+                              </span>
+                            </div>
+                            <span className="font-semibold text-slate-700 shrink-0">
                               {formatCurrency(ord.salePrice)}
                             </span>
                           </div>
@@ -321,9 +331,15 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
                     </div>
                   ) : latestOrder && rx ? (
                     <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 mb-3 text-xs space-y-1">
-                      <div className="flex items-center justify-between text-slate-500 text-[10px] uppercase font-bold">
-                        <span>1. Gözlük</span>
-                        <span>{formatDate(latestOrder.orderDate)}</span>
+                      <div className="flex items-center justify-between gap-2 text-slate-500 text-[10px] uppercase font-bold">
+                        <div className="flex items-center gap-1.5">
+                          <span>1. Gözlük</span>
+                          <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 text-[9px] font-black normal-case">
+                            <CheckCircle2 className="w-2.5 h-2.5" />
+                            Teslim Edildi
+                          </span>
+                        </div>
+                        <span>{formatDate(latestOrder.deliveryDate || latestOrder.orderDate)}</span>
                       </div>
                       <p className="font-bold text-slate-900">
                         Çerçeve: {latestOrder.frame.brand} {latestOrder.frame.model}
@@ -344,7 +360,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
                   {/* Pricing Summary */}
                   <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100">
                     <div>
-                      <span className="text-[10px] text-slate-400 block">Toplam Gözlük:</span>
+                      <span className="text-[10px] text-slate-400 block">Teslim Edilen:</span>
                       <span className="font-bold text-slate-800">{custOrders.length} Gözlük</span>
                     </div>
                     <div className="text-right">
@@ -378,8 +394,12 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
         </div>
       )}
 
-      {/* Customer Profile & All Glasses History Modal */}
-      {selectedCustomer && (
+      {/* Customer Profile & All Delivered Glasses History Modal */}
+      {selectedCustomer && (() => {
+        const selectedDeliveredOrders = getCustomerOrderList(orders, selectedCustomer).filter(
+          (o) => o.status === 'teslim_edildi'
+        );
+        return (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 mid:p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden border border-slate-200 flex flex-col max-h-[92vh]">
             <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
@@ -389,7 +409,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
                     {selectedCustomer.fullName} - Müşteri Dosyası
                   </h3>
                   <span className="px-2 py-0.5 rounded-full text-[11px] font-black bg-cyan-500 text-slate-950">
-                    {getCustomerOrderList(orders, selectedCustomer).length} Gözlük
+                    {selectedDeliveredOrders.length} Teslim Edilen
                   </span>
                 </div>
                 <p className="text-xs text-slate-400">
@@ -465,7 +485,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
                 >
                   <Plus className="w-4 h-4 stroke-[3]" />
                   <span>
-                    +{getCustomerOrderList(orders, selectedCustomer).length + 1}. Gözlük Kaydını Aç
+                    +{selectedDeliveredOrders.length + 1}. Gözlük Kaydını Aç
                   </span>
                 </button>
               </div>
@@ -473,13 +493,18 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="font-bold text-slate-900 text-sm">
-                    Verilen Tüm Gözlükler
+                    Teslim Edilen Tüm Gözlükler
                   </h4>
                   <span className="text-xs text-slate-400">Eskiden yeniye sıralı</span>
                 </div>
 
+                {selectedDeliveredOrders.length === 0 ? (
+                  <div className="p-6 rounded-xl bg-slate-50 border border-slate-200 text-center text-slate-500">
+                    Bu müşteriye henüz teslim edilmiş gözlük kaydı bulunmuyor.
+                  </div>
+                ) : (
                 <div className="space-y-4">
-                  {getCustomerOrderList(orders, selectedCustomer).map((ord, idx) => {
+                  {selectedDeliveredOrders.map((ord, idx) => {
                     const ordRx = ord.prescription;
                     const distR = ordRx.distanceRx?.rightEye || ordRx.rightEye;
                     const distL = ordRx.distanceRx?.leftEye || ordRx.leftEye;
@@ -492,10 +517,14 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
                         key={ord.id}
                         className="p-4 rounded-xl border-2 border-slate-200 bg-white shadow-xs space-y-3"
                       >
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                          <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="font-black text-xs px-2.5 py-1 rounded-full bg-cyan-100 text-cyan-950 border border-cyan-300">
                               👓 {idx + 1}. GÖZLÜK
+                            </span>
+                            <span className="inline-flex items-center gap-1 font-black text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Teslim Edildi{ord.deliveryDate ? ` (${formatDate(ord.deliveryDate)})` : ''}
                             </span>
                             <span className="font-mono text-slate-500">{ord.orderNo}</span>
                             <span className="text-slate-500">• {formatDate(ord.orderDate)}</span>
@@ -544,24 +573,24 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
                           </div>
                         </div>
 
-                        {(distR?.sph || distL?.sph) && (
-                          <div className="bg-white border border-slate-200 rounded-lg p-2 font-mono text-[11px] flex justify-between">
+                        {(distR?.sph || distR?.cyl || distR?.axis || distR?.pd || distL?.sph || distL?.cyl || distL?.axis || distL?.pd) && (
+                          <div className="bg-white border border-slate-200 rounded-lg p-2 font-mono text-[11px] flex flex-col mid:flex-row mid:justify-between gap-1">
                             <span className="text-blue-700 font-bold">
-                              {isBoth ? 'Uzak ' : ''}Sağ: SPH {distR?.sph || '0'} | CYL {distR?.cyl || '0'} | AKS {distR?.axis ? `${distR.axis}°` : '-'}
+                              {isBoth ? 'Uzak ' : ''}Sağ: SPH {distR?.sph || '0'} | CYL {distR?.cyl || '0'} | AKS {distR?.axis ? `${distR.axis}°` : '-'} | PD {distR?.pd ? `${distR.pd} mm` : '-'}
                             </span>
                             <span className="text-indigo-700 font-bold">
-                              {isBoth ? 'Uzak ' : ''}Sol: SPH {distL?.sph || '0'} | CYL {distL?.cyl || '0'} | AKS {distL?.axis ? `${distL.axis}°` : '-'}
+                              {isBoth ? 'Uzak ' : ''}Sol: SPH {distL?.sph || '0'} | CYL {distL?.cyl || '0'} | AKS {distL?.axis ? `${distL.axis}°` : '-'} | PD {distL?.pd ? `${distL.pd} mm` : '-'}
                             </span>
                           </div>
                         )}
 
-                        {nearR && (nearR.sph || nearL?.sph) && (
-                          <div className="bg-amber-50/50 border border-amber-200 rounded-lg p-2 font-mono text-[11px] flex justify-between">
+                        {nearR && (nearR.sph || nearR.cyl || nearR.axis || nearR.pd || nearL?.sph || nearL?.cyl || nearL?.axis || nearL?.pd) && (
+                          <div className="bg-amber-50/50 border border-amber-200 rounded-lg p-2 font-mono text-[11px] flex flex-col mid:flex-row mid:justify-between gap-1">
                             <span className="text-amber-900 font-bold">
-                              Yakın Sağ: SPH {nearR?.sph || '0'} | CYL {nearR?.cyl || '0'} | AKS {nearR?.axis ? `${nearR.axis}°` : '-'}
+                              Yakın Sağ: SPH {nearR?.sph || '0'} | CYL {nearR?.cyl || '0'} | AKS {nearR?.axis ? `${nearR.axis}°` : '-'} | PD {nearR?.pd ? `${nearR.pd} mm` : '-'}
                             </span>
                             <span className="text-orange-900 font-bold">
-                              Yakın Sol: SPH {nearL?.sph || '0'} | CYL {nearL?.cyl || '0'} | AKS {nearL?.axis ? `${nearL.axis}°` : '-'}
+                              Yakın Sol: SPH {nearL?.sph || '0'} | CYL {nearL?.cyl || '0'} | AKS {nearL?.axis ? `${nearL.axis}°` : '-'} | PD {nearL?.pd ? `${nearL.pd} mm` : '-'}
                             </span>
                           </div>
                         )}
@@ -581,6 +610,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
                     );
                   })}
                 </div>
+                )}
               </div>
             </div>
 
@@ -602,7 +632,8 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Add / Edit Customer Form Modal */}
       {showEditModal && (
@@ -705,9 +736,9 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
             ? `${pendingDeleteCustomer.fullName} adlı müşteriyi rehberden silmek istediğinizden emin misiniz?`
             : ''
         }
-        onConfirm={() => {
+        onConfirm={async () => {
           if (pendingDeleteCustomer) {
-            onDeleteCustomer(pendingDeleteCustomer.id);
+            if (!await onDeleteCustomer(pendingDeleteCustomer.id)) return;
             if (selectedCustomer?.id === pendingDeleteCustomer.id) {
               setSelectedCustomer(null);
             }

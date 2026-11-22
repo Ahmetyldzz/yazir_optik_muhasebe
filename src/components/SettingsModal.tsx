@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { Settings, Save, X, Glasses, Plus, Trash2, Eye, Tag } from 'lucide-react';
 import { StoreSettings } from '../types/optical';
-import { storage } from '../services/storage';
+import type { CatalogKey, Catalogs } from '../services/api';
 
 interface SettingsModalProps {
   settings: StoreSettings;
-  onSave: (settings: StoreSettings) => void;
+  catalogs: Catalogs;
+  onSaveCatalog: (key: CatalogKey, values: string[]) => Promise<boolean>;
+  onSave: (settings: StoreSettings) => Promise<boolean>;
   onClose: () => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, onClose }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, catalogs, onSaveCatalog, onSave, onClose }) => {
   const [activeSubTab, setActiveSubTab] = useState<'store' | 'catalog'>('store');
 
   // Store settings
@@ -22,64 +24,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, 
   const [taxNumber, setTaxNumber] = useState(settings.taxNumber || '');
   const [receiptNote, setReceiptNote] = useState(settings.receiptNote);
 
-  // Brand & Model catalogs
-  const [lensBrands, setLensBrands] = useState<string[]>(() => storage.getLensBrands());
+  const { lensBrands, lensModels, frameModels } = catalogs;
   const [newBrandInput, setNewBrandInput] = useState('');
-
-  const [lensModels, setLensModels] = useState<string[]>(() => storage.getLensModels());
   const [newLensModelInput, setNewLensModelInput] = useState('');
-
-  const [frameModels, setFrameModels] = useState<string[]>(() => storage.getFrameModels());
   const [newFrameModelInput, setNewFrameModelInput] = useState('');
 
-  const handleAddBrand = (e: React.FormEvent) => {
+  async function addEntry(event: React.FormEvent, key: CatalogKey, values: string[], input: string, clear: (value: string) => void) {
+    event.preventDefault();
+    const value = input.trim();
+    if (value && await onSaveCatalog(key, [...values, value])) clear('');
+  }
+
+  const handleAddBrand = (event: React.FormEvent) => addEntry(event, 'lens-brands', lensBrands, newBrandInput, setNewBrandInput);
+  const handleAddLensModel = (event: React.FormEvent) => addEntry(event, 'lens-models', lensModels, newLensModelInput, setNewLensModelInput);
+  const handleAddFrameModel = (event: React.FormEvent) => addEntry(event, 'frame-models', frameModels, newFrameModelInput, setNewFrameModelInput);
+  const handleDeleteBrand = (value: string) => onSaveCatalog('lens-brands', lensBrands.filter(entry => entry !== value));
+  const handleDeleteLensModel = (value: string) => onSaveCatalog('lens-models', lensModels.filter(entry => entry !== value));
+  const handleDeleteFrameModel = (value: string) => onSaveCatalog('frame-models', frameModels.filter(entry => entry !== value));
+
+  const handleSubmitStore = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newBrandInput.trim()) {
-      const updated = storage.addLensBrand(newBrandInput.trim());
-      setLensBrands(updated);
-      setNewBrandInput('');
-    }
-  };
-
-  const handleDeleteBrand = (brandToDelete: string) => {
-    const updated = lensBrands.filter((b) => b !== brandToDelete);
-    storage.saveLensBrands(updated);
-    setLensBrands(updated);
-  };
-
-  const handleAddLensModel = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newLensModelInput.trim()) {
-      const updated = storage.addLensModel(newLensModelInput.trim());
-      setLensModels(updated);
-      setNewLensModelInput('');
-    }
-  };
-
-  const handleDeleteLensModel = (modelToDelete: string) => {
-    const updated = lensModels.filter((m) => m !== modelToDelete);
-    storage.saveLensModels(updated);
-    setLensModels(updated);
-  };
-
-  const handleAddFrameModel = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newFrameModelInput.trim()) {
-      const updated = storage.addFrameModel(newFrameModelInput.trim());
-      setFrameModels(updated);
-      setNewFrameModelInput('');
-    }
-  };
-
-  const handleDeleteFrameModel = (modelToDelete: string) => {
-    const updated = frameModels.filter((m) => m !== modelToDelete);
-    storage.saveFrameModels(updated);
-    setFrameModels(updated);
-  };
-
-  const handleSubmitStore = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSave({
+    const saved = await onSave({
       storeName: storeName.trim() || 'Yazır Optik',
       ownerName: ownerName.trim(),
       phone: phone.trim(),
@@ -89,7 +54,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ settings, onSave, 
       taxNumber: taxNumber.trim(),
       receiptNote: receiptNote.trim(),
     });
-    onClose();
+    if (saved) onClose();
   };
 
   return (

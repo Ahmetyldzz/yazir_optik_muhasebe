@@ -1,18 +1,18 @@
 import React, { useState } from 'react';
 import { ShieldCheck, X, Plus, Trash2, Eye, Check } from 'lucide-react';
-import { storage } from '../services/storage';
 import { ConfirmDialog } from './ConfirmDialog';
 
 interface AdminPanelModalProps {
   onClose: () => void;
-  onCatalogUpdated?: () => void;
+  lensBrands: string[];
+  onSaveBrands: (brands: string[]) => Promise<boolean>;
 }
 
 export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onClose,
-  onCatalogUpdated,
+  lensBrands,
+  onSaveBrands,
 }) => {
-  const [lensBrands, setLensBrands] = useState<string[]>(() => storage.getLensBrands());
   const [newBrandInput, setNewBrandInput] = useState('');
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [pendingDeleteBrand, setPendingDeleteBrand] = useState<string | null>(null);
@@ -20,24 +20,20 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const notify = (msg: string) => {
     setSuccessToast(msg);
     setTimeout(() => setSuccessToast(null), 2500);
-    onCatalogUpdated?.();
   };
 
-  const handleAddBrand = (e: React.FormEvent) => {
+  const handleAddBrand = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newBrandInput.trim()) return;
-    const updated = storage.addLensBrand(newBrandInput.trim());
-    setLensBrands(updated);
+    if (!await onSaveBrands([...lensBrands, newBrandInput.trim()])) return;
     setNewBrandInput('');
     notify(`"${newBrandInput.trim()}" markası eklendi.`);
   };
 
-  const confirmDeleteBrand = () => {
+  const confirmDeleteBrand = async () => {
     if (!pendingDeleteBrand) return;
     const brand = pendingDeleteBrand;
-    const updated = lensBrands.filter((b) => b !== brand);
-    storage.saveLensBrands(updated);
-    setLensBrands(updated);
+    if (!await onSaveBrands(lensBrands.filter(entry => entry !== brand))) return;
     setPendingDeleteBrand(null);
     notify(`"${brand}" markası silindi.`);
   };

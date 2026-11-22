@@ -14,7 +14,7 @@ interface OrderDetailModalProps {
   settings: StoreSettings;
   onClose: () => void;
   onEdit: (order: SaleOrder) => void;
-  onDelete: (orderId: string) => void;
+  onDelete: (orderId: string) => Promise<boolean>;
   onUpdateStatus?: (orderId: string, newStatus: OrderStatus) => void;
   onAddPayment?: (orderId: string, additionalAmount: number) => void;
   onPrint: (order: SaleOrder) => void;
@@ -123,6 +123,13 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   total > 1 ? 'bg-amber-400 text-slate-950' : 'bg-cyan-500 text-slate-950'
                 }`}>
                   {index}. Gözlük (Toplam {total})
+                </span>
+                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full ${
+                  order.status === 'teslim_edildi'
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'bg-slate-700 text-amber-300 border border-slate-600'
+                }`}>
+                  {order.status === 'teslim_edildi' ? 'Teslim Edildi' : 'Hazırlanıyor'}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -412,10 +419,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         isOpen={showDeleteConfirm}
         title="Gözlük Kaydını Sil"
         message={`${order.customer.fullName} adına kayıtlı bu siparişi (${order.orderNo}) silmek istediğinizden emin misiniz?`}
-        onConfirm={() => {
-          setShowDeleteConfirm(false);
-          onDelete(order.id);
-          onClose();
+        onConfirm={async () => {
+          if (await onDelete(order.id)) onClose();
         }}
         onCancel={() => setShowDeleteConfirm(false)}
       />

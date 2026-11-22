@@ -5,13 +5,17 @@ import { formatCurrency, formatDate } from '../utils/formatters';
 
 interface InventoryManagerProps {
   inventory: InventoryItem[];
-  onUpdateInventory: (items: InventoryItem[]) => void;
+  onSave: (item: InventoryItem, exists: boolean) => Promise<boolean>;
+  onDelete: (id: string) => Promise<boolean>;
+  onAdjust: (id: string, delta: number) => Promise<boolean>;
   onOpenNewOrderWithFrame?: (item: InventoryItem) => void;
 }
 
 export const InventoryManager: React.FC<InventoryManagerProps> = ({
   inventory,
-  onUpdateInventory,
+  onSave,
+  onDelete,
+  onAdjust,
   onOpenNewOrderWithFrame,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -67,7 +71,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     setShowAddModal(true);
   };
 
-  const handleSaveItem = (e: React.FormEvent) => {
+  const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!brand.trim()) {
       alert('Lütfen marka giriniz.');
@@ -83,7 +87,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       category,
       barcode: barcode.trim() || Math.floor(100000000000 + Math.random() * 900000000000).toString(),
       quantity: parseInt(quantity) || 0,
-      minQuantity: parseInt(minQuantity) || 2,
+      minQuantity: parseInt(minQuantity) || 0,
       costPrice: parseFloat(costPrice) || 0,
       salePrice: parseFloat(salePrice) || 0,
       supplier: supplier.trim(),
@@ -91,30 +95,13 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       updatedAt: new Date().toISOString().split('T')[0],
     };
 
-    if (editingItem) {
-      onUpdateInventory(inventory.map((i) => (i.id === editingItem.id ? newItem : i)));
-    } else {
-      onUpdateInventory([newItem, ...inventory]);
-    }
-    setShowAddModal(false);
+    if (await onSave(newItem, Boolean(editingItem))) setShowAddModal(false);
   };
 
-  const adjustQuantity = (id: string, delta: number) => {
-    onUpdateInventory(
-      inventory.map((item) => {
-        if (item.id === id) {
-          const newQty = Math.max(0, item.quantity + delta);
-          return { ...item, quantity: newQty, updatedAt: new Date().toISOString().split('T')[0] };
-        }
-        return item;
-      })
-    );
-  };
+  const adjustQuantity = (id: string, delta: number) => onAdjust(id, delta);
 
-  const deleteItem = (id: string) => {
-    if (confirm('Bu stok kartını silmek istediğinizden emin misiniz?')) {
-      onUpdateInventory(inventory.filter((i) => i.id !== id));
-    }
+  const deleteItem = async (id: string) => {
+    if (confirm('Bu stok kartını silmek istediğinizden emin misiniz?')) await onDelete(id);
   };
 
   const filteredInventory = useMemo(() => {
@@ -288,6 +275,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                       <div className="flex items-center justify-center gap-1.5">
                         <button
                           onClick={() => adjustQuantity(item.id, -1)}
+                          disabled={item.quantity === 0}
                           className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold flex items-center justify-center cursor-pointer transition-colors"
                           title="1 Azalt"
                         >
