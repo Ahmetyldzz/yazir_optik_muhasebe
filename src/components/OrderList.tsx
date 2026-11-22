@@ -15,9 +15,9 @@ interface OrderListProps {
   filterStatus?: string;
   onSelectOrder: (order: SaleOrder) => void;
   onEditOrder: (order: SaleOrder) => void;
-  onDeleteOrder: (orderId: string) => void;
+  onDeleteOrder: (orderId: string) => Promise<boolean>;
   onPrintOrder: (order: SaleOrder) => void;
-  onUpdateStatus?: (orderId: string, status: OrderStatus) => void;
+  onUpdateStatus?: (orderId: string, status: OrderStatus) => Promise<boolean>;
   onNewOrderForCustomer?: (customer: Customer) => void;
 }
 
@@ -872,9 +872,9 @@ export const OrderList: React.FC<OrderListProps> = ({
         }
         confirmLabel="Evet, Teslim Edildi"
         cancelLabel="Vazgeç"
-        onConfirm={() => {
+        onConfirm={async () => {
           if (pendingDeliverOrder && onUpdateStatus) {
-            onUpdateStatus(pendingDeliverOrder.id, 'teslim_edildi');
+            if (!await onUpdateStatus(pendingDeliverOrder.id, 'teslim_edildi')) return;
             setPendingDeliverOrder(null);
           }
         }}
@@ -889,9 +889,9 @@ export const OrderList: React.FC<OrderListProps> = ({
             ? `${pendingDeleteOrder.customer.fullName} adına kayıtlı gözlük siparişini (${pendingDeleteOrder.orderNo}) silmek istediğinize emin misiniz?`
             : ''
         }
-        onConfirm={() => {
+        onConfirm={async () => {
           if (pendingDeleteOrder) {
-            onDeleteOrder(pendingDeleteOrder.id);
+            if (!await onDeleteOrder(pendingDeleteOrder.id)) return;
             setPendingDeleteOrder(null);
           }
         }}

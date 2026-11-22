@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Header, ActiveTabType } from './components/Header';
 import { OrderList } from './components/OrderList';
 import { OrderDetailModal } from './components/OrderDetailModal';
@@ -15,6 +15,8 @@ import { BackupModal } from './components/BackupModal';
 import { SettingsModal } from './components/SettingsModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { FinanceAuthModal } from './components/FinanceAuthModal';
+import { api, recordPath, type StoreData } from './services/api';
+import { InventoryManager } from './components/InventoryManager';
 import { storage } from './services/storage';
 import { getCustomerOrderList } from './utils/formatters';
 import {
@@ -22,11 +24,10 @@ import {
 } from './types/optical';
 
 export default function App() {
-  const [orders, setOrders] = useState<SaleOrder[]>(() => storage.getOrders());
-  const [customers, setCustomers] = useState<Customer[]>(() => storage.getCustomers());
-  const [settings, setSettings] = useState<StoreSettings>(() => storage.getSettings());
-  const [accounts, setAccounts] = useState<CashAccount[]>(() => storage.getAccounts());
-  const [transactions, setTransactions] = useState<CashTransaction[]>(() => storage.getTransactions());
+  const [data, setData] = useState<StoreData | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const working = useRef(false);
 
   const [activeTab, setActiveTab] = useState<ActiveTabType>('orders');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -42,26 +43,37 @@ export default function App() {
   const [isFinanceUnlocked, setIsFinanceUnlocked] = useState<boolean>(() => storage.isFinanceSessionValid());
   const [isFinanceAuthOpen, setIsFinanceAuthOpen] = useState(false);
 
-  // Sync state to localStorage whenever it changes
-  useEffect(() => {
-    storage.saveOrders(orders);
-  }, [orders]);
+  async function refresh() {
+    const next = await api<StoreData>('/backup');
+    setData(next);
+    setSelectedOrder(current => current ? next.orders.find(order => order.id === current.id) ?? null : null);
+  }
 
-  useEffect(() => {
-    storage.saveCustomers(customers);
-  }, [customers]);
+  async function run(operation?: () => Promise<unknown>): Promise<boolean> {
+    if (working.current) return false;
+    working.current = true;
+    setBusy(true);
+    setError('');
+    let saved = false;
+    try {
+      if (operation) {
+        await operation();
+        saved = true;
+      }
+      await refresh();
+      return true;
+    } catch (failure) {
+      setError(saved ? 'İşlem kaydedildi. Ekranı güncellemek için Yenile düğmesini kullanın.'
+        : failure instanceof Error ? failure.message : 'İşlem tamamlanamadı.');
+      if (!saved && operation) await refresh().catch(() => {});
+      return saved;
+    } finally {
+      working.current = false;
+      setBusy(false);
+    }
+  }
 
-  useEffect(() => {
-    storage.saveSettings(settings);
-  }, [settings]);
-
-  useEffect(() => {
-    storage.saveAccounts(accounts);
-  }, [accounts]);
-
-  useEffect(() => {
-    storage.saveTransactions(transactions);
-  }, [transactions]);
+  useEffect(() => { void run(); }, []);
 
   // Automatically re-lock Ciro & Kasa Özeti after 1 hour expires
   useEffect(() => {
@@ -93,103 +105,26 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [isFinanceUnlocked, activeTab]);
 
-  // Order Handlers
-  const handleSaveOrder = (savedOrder: SaleOrder) => {
-    setOrders((prev) => {
-      const exists = prev.some((o) => o.id === savedOrder.id);
-      if (exists) {
-        return prev.map((o) => (o.id === savedOrder.id ? savedOrder : o));
-      } else {
-        return [savedOrder, ...prev];
-      }
-    });
+  const saveRecord = (collection: string, record: { id: string }, exists: boolean) =>
+    run(() => api(exists ? recordPath(collection, record.id) : '/' + collection, exists ? 'PATCH' : 'POST', record));
+  const removeRecord = (collection: string, id: string) => run(() => api(recordPath(collection, id), 'DELETE'));
+  const updateOrder = (id: string, fields: Partial<SaleOrder>) =>
+    run(() => api(recordPath('orders', id), 'PATCH', fields));
 
-    // Automatically sync customer to customers directory
-    setCustomers((prev) => {
-      const exists = prev.some(
-        (c) =>
-          c.id === savedOrder.customer.id ||
-          (savedOrder.customer.tcNo && c.tcNo === savedOrder.customer.tcNo)
-      );
-      if (exists) {
-        return prev.map((c) =>
-          c.id === savedOrder.customer.id || (savedOrder.customer.tcNo && c.tcNo === savedOrder.customer.tcNo)
-            ? savedOrder.customer
-            : c
-        );
-      } else {
-        return [savedOrder.customer, ...prev];
-      }
-    });
-
-    setEditingOrder(null);
-    setIsNewOrderModalOpen(false);
-
-    if (selectedOrder && selectedOrder.id === savedOrder.id) {
-      setSelectedOrder(savedOrder);
+  const handleSaveOrder = async (order: SaleOrder) => {
+    const { id, orderNo, ...fields } = order;
+    const saved = await (editingOrder?.id ? updateOrder(id, fields) : run(() => api('/orders', 'POST', fields)));
+    if (saved) {
+      setEditingOrder(null);
+      setIsNewOrderModalOpen(false);
     }
+    return saved;
   };
-
-  const handleUpdateStatus = (orderId: string, newStatus: OrderStatus) => {
-    setOrders((prev) =>
-      prev.map((o) => {
-        if (o.id === orderId) {
-          const updated = { ...o, status: newStatus };
-          if (newStatus === 'teslim_edildi' && !o.deliveryDate) {
-            updated.deliveryDate = new Date().toISOString().split('T')[0];
-          }
-          return updated;
-        }
-        return o;
-      })
-    );
-
-    if (selectedOrder && selectedOrder.id === orderId) {
-      setSelectedOrder((prev) => (prev ? { ...prev, status: newStatus } : null));
-    }
-  };
-
-  const handleDeleteOrder = (orderId: string) => {
-    setOrders((prev) => prev.filter((o) => o.id !== orderId));
-    if (selectedOrder?.id === orderId) {
-      setSelectedOrder(null);
-    }
-  };
-
-  // Customer Handlers
-  const handleSaveCustomer = (customer: Customer) => {
-    setCustomers((prev) => {
-      const exists = prev.some((c) => c.id === customer.id);
-      if (exists) {
-        return prev.map((c) => (c.id === customer.id ? customer : c));
-      } else {
-        return [customer, ...prev];
-      }
-    });
-
-    // Also update customer info across their past orders
-    setOrders((prev) =>
-      prev.map((ord) => {
-        if (ord.customer.id === customer.id || (customer.tcNo && ord.customer.tcNo === customer.tcNo)) {
-          return {
-            ...ord,
-            customer: {
-              ...ord.customer,
-              fullName: customer.fullName,
-              tcNo: customer.tcNo,
-              phone: customer.phone,
-              notes: customer.notes,
-            },
-          };
-        }
-        return ord;
-      })
-    );
-  };
-
-  const handleDeleteCustomer = (customerId: string) => {
-    setCustomers((prev) => prev.filter((c) => c.id !== customerId));
-  };
+  const handleUpdateStatus = (id: string, status: OrderStatus) => updateOrder(id, { status });
+  const handleDeleteOrder = (id: string) => removeRecord('orders', id);
+  const handleSaveCustomer = (customer: Customer) =>
+    saveRecord('customers', customer, Boolean(data?.customers.some(row => row.id === customer.id)));
+  const handleDeleteCustomer = (id: string) => removeRecord('customers', id);
 
   const handleNewOrderForCustomer = (customer: Customer) => {
     setEditingOrder({
@@ -239,32 +174,33 @@ export default function App() {
     setIsNewOrderModalOpen(true);
   };
 
-  const handleAddTransaction = (tx: CashTransaction) => {
-    setTransactions((prev) => [tx, ...prev]);
-  };
-
-  const handleUpdateTransaction = (updatedTx: CashTransaction) => {
-    setTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
-  };
-
-  const handleDeleteTransaction = (txId: string) => {
-    setTransactions((prev) => prev.filter((t) => t.id !== txId));
-  };
-
-  const handleAssignOrderAccount = (orderId: string, accountId: string) => {
-    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, accountId } : o)));
-    if (selectedOrder && selectedOrder.id === orderId) {
-      setSelectedOrder((prev) => (prev ? { ...prev, accountId } : null));
+  const handleAddTransaction = (tx: CashTransaction) => saveRecord('transactions', tx, false);
+  const handleUpdateTransaction = (tx: CashTransaction) => saveRecord('transactions', tx, true);
+  const handleDeleteTransaction = (id: string) => removeRecord('transactions', id);
+  const handleAssignOrderAccount = (id: string, accountId: string) => updateOrder(id, { accountId });
+  const handleSaveAccounts = (updated: CashAccount[]) => run(async () => {
+    for (const account of updated) {
+      const previous = data?.accounts.find(row => row.id === account.id);
+      if (previous?.name !== account.name) await api(recordPath('accounts', account.id), 'PATCH', { name: account.name });
     }
-  };
+  });
+  const handleSaveSettings = (settings: StoreSettings) => run(() => api('/settings', 'PUT', settings));
 
-  const handleDataRestored = () => {
-    setOrders(storage.getOrders());
-    setCustomers(storage.getCustomers());
-    setSettings(storage.getSettings());
-    setAccounts(storage.getAccounts());
-    setTransactions(storage.getTransactions());
-  };
+  if (!data) {
+    return (
+      <main className="max-w-xl mx-auto p-8" aria-busy={busy}>
+        <p role={error ? 'alert' : 'status'}>{error || 'Kayıtlar yükleniyor…'}</p>
+        {error && <button className="mt-4 underline" onClick={() => void run()}>Tekrar dene</button>}
+      </main>
+    );
+  }
+
+  const { customers, settings, accounts, transactions, inventory } = data;
+  const customerById = new Map(customers.map(customer => [customer.id, customer]));
+  const orders = data.orders.map(order => ({
+    ...order, customer: customerById.get(order.customer.id) ?? order.customer,
+  }));
+  const displayedOrder = selectedOrder && orders.find(order => order.id === selectedOrder.id);
 
   const pendingDeliveries = orders.filter((o) => o.status !== 'teslim_edildi').length;
 
@@ -291,6 +227,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans selection:bg-cyan-200">
+      {error && (
+        <div role="alert" className="fixed top-4 right-4 z-[100] max-w-sm rounded-lg bg-red-800 p-4 text-white shadow-lg">
+          <p>{error}</p>
+          <button onClick={() => void run()} className="mt-2 mr-4 underline">Yenile</button>
+          <button onClick={() => setError('')} className="mt-2 underline">Kapat</button>
+        </div>
+      )}
+      {busy && <div role="status" className="fixed bottom-4 right-4 z-[100] rounded-lg bg-slate-900 px-4 py-2 text-white">İşlem sürüyor…</div>}
       {/* Top Bar Header */}
       <Header
         settings={settings}
@@ -340,6 +284,15 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'inventory' && (
+          <InventoryManager
+            inventory={inventory}
+            onSave={(item, exists) => saveRecord('inventory', item, exists)}
+            onDelete={(id) => removeRecord('inventory', id)}
+            onAdjust={(id, delta) => run(() => api(recordPath('inventory', id) + '/adjust', 'POST', { delta }))}
+          />
+        )}
+
         {/* TAB 3: CİRO & KASA ÖZETİ */}
         {activeTab === 'finance' && isFinanceUnlocked && (
           <FinanceSummary
@@ -347,7 +300,7 @@ export default function App() {
             accounts={accounts}
             transactions={transactions}
             onSelectOrder={(ord) => setSelectedOrder(ord)}
-            onSaveAccounts={(updatedAccounts) => setAccounts(updatedAccounts)}
+            onSaveAccounts={handleSaveAccounts}
             onAddTransaction={handleAddTransaction}
             onUpdateTransaction={handleUpdateTransaction}
             onDeleteTransaction={handleDeleteTransaction}
@@ -378,6 +331,8 @@ export default function App() {
       {/* Admin Panel Modal (Cam Markaları & Modelleri Yönetimi) */}
       {isAdminPanelOpen && (
         <AdminPanelModal
+          lensBrands={data.lensBrands}
+          onSaveBrands={(brands) => run(() => api('/catalog/lens-brands', 'PUT', brands))}
           onClose={() => setIsAdminPanelOpen(false)}
         />
       )}
@@ -386,6 +341,7 @@ export default function App() {
       {isNewOrderModalOpen && (
         <NewOrderModal
           initialOrder={editingOrder}
+          catalogs={data}
           customers={customers}
           orders={orders}
           accounts={accounts}
@@ -398,9 +354,9 @@ export default function App() {
       )}
 
       {/* Order Detail Modal */}
-      {selectedOrder && (
+      {displayedOrder && (
         <OrderDetailModal
-          order={selectedOrder}
+          order={displayedOrder}
           orders={orders}
           settings={settings}
           onClose={() => setSelectedOrder(null)}
@@ -411,7 +367,6 @@ export default function App() {
           }}
           onDelete={handleDeleteOrder}
           onUpdateStatus={handleUpdateStatus}
-          onAddPayment={() => {}}
           onPrint={(ord) => {
             setSelectedOrder(null);
             setPrintingOrder(ord);
@@ -434,7 +389,7 @@ export default function App() {
       {isBackupModalOpen && (
         <BackupModal
           onClose={() => setIsBackupModalOpen(false)}
-          onDataRestored={handleDataRestored}
+          onRestore={(backup) => run(() => api('/backup', 'POST', backup))}
         />
       )}
 
@@ -442,7 +397,9 @@ export default function App() {
       {isSettingsModalOpen && (
         <SettingsModal
           settings={settings}
-          onSave={(newSettings) => setSettings(newSettings)}
+          catalogs={data}
+          onSaveCatalog={(key, values) => run(() => api('/catalog/' + key, 'PUT', values))}
+          onSave={handleSaveSettings}
           onClose={() => setIsSettingsModalOpen(false)}
         />
       )}

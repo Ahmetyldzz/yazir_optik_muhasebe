@@ -2,7 +2,7 @@ import React from 'react';
 import { Glasses, Plus, Users, LayoutDashboard, BarChart3, Settings, Database, ShieldCheck, Lock } from 'lucide-react';
 import { StoreSettings } from '../types/optical';
 
-export type ActiveTabType = 'orders' | 'customers' | 'finance';
+export type ActiveTabType = 'orders' | 'customers' | 'finance' | 'inventory';
 
 interface HeaderProps {
   settings: StoreSettings;
@@ -145,6 +145,15 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="ml-0.5 text-[11px] desk:text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
               {customersCount} Müşteri
             </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('inventory')}
+            aria-current={activeTab === 'inventory' ? 'page' : undefined}
+            className={'px-3 mid:px-4 desk:px-5 py-2.5 text-xs desk:text-sm font-semibold border-b-2 whitespace-nowrap shrink-0 ' +
+              (activeTab === 'inventory' ? 'border-cyan-400 text-cyan-300 bg-slate-800/50' : 'border-transparent text-slate-400 hover:text-slate-200')}
+          >
+            Stok
           </button>
 
           <button

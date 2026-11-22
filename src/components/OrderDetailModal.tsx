@@ -14,7 +14,7 @@ interface OrderDetailModalProps {
   settings: StoreSettings;
   onClose: () => void;
   onEdit: (order: SaleOrder) => void;
-  onDelete: (orderId: string) => void;
+  onDelete: (orderId: string) => Promise<boolean>;
   onUpdateStatus?: (orderId: string, newStatus: OrderStatus) => void;
   onAddPayment?: (orderId: string, additionalAmount: number) => void;
   onPrint: (order: SaleOrder) => void;
@@ -419,10 +419,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         isOpen={showDeleteConfirm}
         title="Gözlük Kaydını Sil"
         message={`${order.customer.fullName} adına kayıtlı bu siparişi (${order.orderNo}) silmek istediğinizden emin misiniz?`}
-        onConfirm={() => {
-          setShowDeleteConfirm(false);
-          onDelete(order.id);
-          onClose();
+        onConfirm={async () => {
+          if (await onDelete(order.id)) onClose();
         }}
         onCancel={() => setShowDeleteConfirm(false)}
       />

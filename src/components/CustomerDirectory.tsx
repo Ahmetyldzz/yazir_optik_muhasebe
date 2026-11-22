@@ -13,8 +13,8 @@ import {
 interface CustomerDirectoryProps {
   customers: Customer[];
   orders: SaleOrder[];
-  onSaveCustomer: (customer: Customer) => void;
-  onDeleteCustomer: (customerId: string) => void;
+  onSaveCustomer: (customer: Customer) => Promise<boolean>;
+  onDeleteCustomer: (customerId: string) => Promise<boolean>;
   onNewOrderForCustomer: (customer: Customer) => void;
   onViewOrder: (order: SaleOrder) => void;
 }
@@ -104,7 +104,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
     setShowEditModal(true);
   };
 
-  const handleSaveCustomerForm = (e: React.FormEvent) => {
+  const handleSaveCustomerForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) return;
 
@@ -117,7 +117,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
       createdAt: editingCustomer?.createdAt || new Date().toISOString(),
     };
 
-    onSaveCustomer(saved);
+    if (!await onSaveCustomer(saved)) return;
     if (selectedCustomer && selectedCustomer.id === saved.id) {
       setSelectedCustomer(saved);
     }
@@ -736,9 +736,9 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
             ? `${pendingDeleteCustomer.fullName} adlı müşteriyi rehberden silmek istediğinizden emin misiniz?`
             : ''
         }
-        onConfirm={() => {
+        onConfirm={async () => {
           if (pendingDeleteCustomer) {
-            onDeleteCustomer(pendingDeleteCustomer.id);
+            if (!await onDeleteCustomer(pendingDeleteCustomer.id)) return;
             if (selectedCustomer?.id === pendingDeleteCustomer.id) {
               setSelectedCustomer(null);
             }

@@ -5,7 +5,7 @@ import {
 import {
   SaleOrder, Customer, GlassesUsageType, UsageOption, EyeValues, CashAccount
 } from '../types/optical';
-import { storage } from '../services/storage';
+import type { Catalogs } from '../services/api';
 import {
   formatDate, formatCurrency, formatPhoneInput,
   getCustomerOrderList, getOrderIndexForCustomer
@@ -15,8 +15,9 @@ interface NewOrderModalProps {
   initialOrder?: SaleOrder | null;
   customers: Customer[];
   orders: SaleOrder[];
-  accounts?: CashAccount[];
-  onSave: (order: SaleOrder) => void;
+  accounts: CashAccount[];
+  catalogs: Catalogs;
+  onSave: (order: SaleOrder) => Promise<boolean>;
   onClose: () => void;
 }
 
@@ -36,14 +37,11 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   initialOrder,
   customers,
   orders,
-  accounts: propAccounts,
+  accounts,
+  catalogs,
   onSave,
   onClose,
 }) => {
-  const accounts = useMemo(
-    () => (propAccounts && propAccounts.length > 0 ? propAccounts : storage.getAccounts()),
-    [propAccounts]
-  );
   const isEditingExisting = Boolean(initialOrder?.id);
 
   // 1. Customer State
@@ -134,8 +132,9 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   const [orderDate, setOrderDate] = useState(
     initialOrder?.orderDate || new Date().toISOString().split('T')[0]
   );
+  const [paidAmountInput, setPaidAmountInput] = useState(initialOrder?.id ? String(initialOrder.paidAmount) : '');
   const [accountId, setAccountId] = useState<string>(
-    initialOrder?.accountId || accounts[0]?.id || 'acc-1'
+    initialOrder?.accountId || accounts[0]?.id || ''
   );
   const [notes, setNotes] = useState(initialOrder?.notes || '');
 
@@ -272,7 +271,12 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
     const fp = parseFloat(framePriceInput) || 0;
     const lp = parseFloat(lensPriceInput) || 0;
-    const finalSalePrice = fp + lp;
+    const finalSalePrice = (Math.round(fp * 100) + Math.round(lp * 100)) / 100;
+    const paidAmount = paidAmountInput === '' ? finalSalePrice : Number(paidAmountInput);
+    if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+      setFormError('Geçerli bir tahsilat tutarı giriniz.');
+      return;
+    }
 
     if (finalSalePrice <= 0) {
       setFormError('Lütfen gözlük veya cam fiyatını giriniz.');
@@ -332,6 +336,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       id: orderId,
       orderNo: orderNumber,
       customer: {
+        ...initialOrder?.customer,
         id: initialOrder?.customer.id || `cust-${Date.now()}`,
         fullName: fullName.trim(),
         tcNo: cleanTc,
@@ -339,6 +344,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         createdAt: initialOrder?.customer.createdAt || new Date().toISOString(),
       },
       prescription: {
+        ...initialOrder?.prescription,
         usageType: resolvedUsageType,
         usageTypes,
         rightEye: primaryRx.rightEye,
@@ -346,37 +352,39 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         distanceRx: (hasUzak || isProgresif) ? distPair : undefined,
         nearRx: (hasYakin || isProgresif) ? nearPair : undefined,
         lensType: primaryModel || 'Standart',
-        lensFeatures: [],
+        lensFeatures: initialOrder?.prescription.lensFeatures ?? [],
         lensBrand: primaryBrand,
         lensModel: primaryModel,
         nearLensBrand: (hasUzak && hasYakin) ? nearLensBrand.trim() : undefined,
         nearLensModel: (hasUzak && hasYakin) ? nearLensModel.trim() : undefined,
-        lensIndex: '',
+        lensIndex: initialOrder?.prescription.lensIndex ?? '',
       },
       frame: {
+        ...initialOrder?.frame,
         brand: frameBrand.trim() || 'Genel Çerçeve',
         model: frameModel.trim(),
         colorCode: frameColor.trim(),
         size: initialOrder?.frame.size || '',
-        type: 'numarali',
+        type: initialOrder?.frame.type ?? 'numarali',
       },
       framePrice: fp,
       lensPrice: lp,
-      costPrice: 0,
+      costPrice: initialOrder?.costPrice ?? 0,
       listPrice: finalSalePrice,
       salePrice: finalSalePrice,
-      paidAmount: finalSalePrice,
-      remainingAmount: 0,
+      paidAmount,
+      remainingAmount: Math.max(0, finalSalePrice - paidAmount),
+      deliveryDate: initialOrder?.deliveryDate,
+      paymentMethod: initialOrder?.paymentMethod,
       accountId,
       status: initialOrder?.status || 'hazirlaniyor',
       orderDate,
-      warrantyMonths: 24,
+      warrantyMonths: initialOrder?.warrantyMonths ?? 24,
       notes: notes.trim(),
       createdAt: isEditingExisting ? (initialOrder?.createdAt || new Date().toISOString()) : new Date().toISOString(),
     };
 
-    onSave(newOrder);
-    onClose();
+    void onSave(newOrder);
   };
 
   return (
@@ -414,6 +422,9 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="overflow-y-auto p-6 space-y-5">
+          <datalist id="order-frame-models">{catalogs.frameModels.map(value => <option key={value} value={value} />)}</datalist>
+          <datalist id="order-lens-brands">{catalogs.lensBrands.map(value => <option key={value} value={value} />)}</datalist>
+          <datalist id="order-lens-models">{catalogs.lensModels.map(value => <option key={value} value={value} />)}</datalist>
           {formError && (
             <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl text-xs font-bold">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
@@ -566,7 +577,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={frameModel}
+                  list="order-frame-models"
+                        value={frameModel}
                   onChange={(e) => setFrameModel(e.target.value)}
                   placeholder="Model adı"
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:bg-white focus:border-cyan-500 outline-none"
@@ -666,6 +678,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                       <input
                         type="text"
                         required
+                        list="order-lens-brands"
                         value={distanceLensBrand}
                         onChange={(e) => setDistanceLensBrand(e.target.value)}
                         placeholder="Cam markası adı"
@@ -678,6 +691,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                       </label>
                       <input
                         type="text"
+                        list="order-lens-models"
                         value={distanceLensModel}
                         onChange={(e) => setDistanceLensModel(e.target.value)}
                         placeholder="Model adı"
@@ -735,7 +749,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     <input
                       type="text"
                       required
-                      value={distanceLensBrand}
+                      list="order-lens-brands"
+                        value={distanceLensBrand}
                       onChange={(e) => setDistanceLensBrand(e.target.value)}
                       placeholder="Cam markası adı"
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-black text-slate-950 focus:border-blue-500 outline-none"
@@ -748,7 +763,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     </label>
                     <input
                       type="text"
-                      value={distanceLensModel}
+                      list="order-lens-models"
+                        value={distanceLensModel}
                       onChange={(e) => setDistanceLensModel(e.target.value)}
                       placeholder="Model adı"
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-950 focus:border-blue-500 outline-none"
@@ -791,7 +807,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     <input
                       type="text"
                       required
-                      value={nearLensBrand}
+                      list="order-lens-brands"
+                        value={nearLensBrand}
                       onChange={(e) => setNearLensBrand(e.target.value)}
                       placeholder="Cam markası adı"
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-black text-slate-950 focus:border-amber-500 outline-none"
@@ -804,7 +821,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                     </label>
                     <input
                       type="text"
-                      value={nearLensModel}
+                      list="order-lens-models"
+                        value={nearLensModel}
                       onChange={(e) => setNearLensModel(e.target.value)}
                       placeholder="Model adı"
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-950 focus:border-amber-500 outline-none"
@@ -845,7 +863,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                 <input
                   type="number"
                   min="0"
-                  step="any"
+                  step="0.01"
                   value={framePriceInput}
                   onChange={(e) => setFramePriceInput(e.target.value)}
                   placeholder="örn: 2000"
@@ -860,7 +878,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                 <input
                   type="number"
                   min="0"
-                  step="any"
+                  step="0.01"
                   value={lensPriceInput}
                   onChange={(e) => setLensPriceInput(e.target.value)}
                   placeholder="örn: 3000"
@@ -883,7 +901,20 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
               </div>
             </div>
 
-            {/* Ödeme Alınan Hesap (3 Kişi + Ortak) */}
+            <label className="block text-xs font-semibold text-slate-700">
+            Tahsil edilen tutar (₺)
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={paidAmountInput}
+              placeholder="Satış toplamı"
+              onChange={(event) => setPaidAmountInput(event.target.value)}
+              className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+            />
+          </label>
+
+          {/* Ödeme Alınan Hesap (3 Kişi + Ortak) */}
             <div className="pt-2 border-t border-cyan-100">
               <label className="text-xs font-bold text-slate-800 block mb-1.5">
                 Tahsilat Hesabı (Para Hangi Hesaba Girdi?)

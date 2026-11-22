@@ -14,10 +14,10 @@ interface FinanceSummaryProps {
   accounts: CashAccount[];
   transactions: CashTransaction[];
   onSelectOrder: (order: SaleOrder) => void;
-  onSaveAccounts: (accounts: CashAccount[]) => void;
-  onAddTransaction: (tx: CashTransaction) => void;
-  onUpdateTransaction: (tx: CashTransaction) => void;
-  onDeleteTransaction: (txId: string) => void;
+  onSaveAccounts: (accounts: CashAccount[]) => Promise<boolean>;
+  onAddTransaction: (tx: CashTransaction) => Promise<boolean>;
+  onUpdateTransaction: (tx: CashTransaction) => Promise<boolean>;
+  onDeleteTransaction: (txId: string) => Promise<boolean>;
   onAssignOrderAccount: (orderId: string, accountId: string) => void;
   onLockFinance?: () => void;
 }
@@ -329,7 +329,7 @@ export const FinanceSummary: React.FC<FinanceSummaryProps> = ({
     setIsTxModalOpen(true);
   };
 
-  const handleSaveTx = (e: React.FormEvent) => {
+  const handleSaveTx = async (e: React.FormEvent) => {
     e.preventDefault();
     const parsedAmount = parseFloat(txAmount);
     if (!parsedAmount || parsedAmount <= 0) {
@@ -352,12 +352,8 @@ export const FinanceSummary: React.FC<FinanceSummaryProps> = ({
       createdAt: editingTx ? editingTx.createdAt : new Date().toISOString(),
     };
 
-    if (editingTx) {
-      onUpdateTransaction(saved);
-    } else {
-      onAddTransaction(saved);
-    }
-    setIsTxModalOpen(false);
+    const success = await (editingTx ? onUpdateTransaction(saved) : onAddTransaction(saved));
+    if (success) setIsTxModalOpen(false);
   };
 
   const handleOpenAccountModal = () => {
@@ -365,14 +361,13 @@ export const FinanceSummary: React.FC<FinanceSummaryProps> = ({
     setIsAccountModalOpen(true);
   };
 
-  const handleSaveAccountNames = (e: React.FormEvent) => {
+  const handleSaveAccountNames = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleaned = accountDrafts.map((a, idx) => ({
       ...a,
       name: a.name.trim() || (a.id === 'acc-common' ? 'Ortak Hesap' : `${idx + 1}. Kişi Hesabı`),
     }));
-    onSaveAccounts(cleaned);
-    setIsAccountModalOpen(false);
+    if (await onSaveAccounts(cleaned)) setIsAccountModalOpen(false);
   };
 
   return (
@@ -1195,9 +1190,9 @@ export const FinanceSummary: React.FC<FinanceSummaryProps> = ({
             ? `"${pendingDeleteTx.description}" (${formatCurrency(pendingDeleteTx.amount)}) kaydını silmek istediğinize emin misiniz?`
             : ''
         }
-        onConfirm={() => {
+        onConfirm={async () => {
           if (pendingDeleteTx) {
-            onDeleteTransaction(pendingDeleteTx.id);
+            if (!await onDeleteTransaction(pendingDeleteTx.id)) return;
             setPendingDeleteTx(null);
           }
         }}
